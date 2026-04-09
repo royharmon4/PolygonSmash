@@ -16,23 +16,21 @@
 
     body {
       margin: 0;
-      min-height: 100vh;
-      display: grid;
-      place-items: center;
+      min-height: 100dvh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
       background:
         radial-gradient(circle at top, rgba(133,184,255,0.18), transparent 28%),
         linear-gradient(180deg, #08101d 0%, #050a14 100%);
       color: var(--text);
       font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      padding: 20px;
+      padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
     }
 
     .shell {
-      width: min(100%, 980px);
-      display: grid;
-      grid-template-columns: minmax(300px, 560px) minmax(240px, 340px);
-      gap: 18px;
-      align-items: start;
+      width: min(100%, 460px);
+      height: min(100%, 940px);
     }
 
     .card {
@@ -43,7 +41,13 @@
       backdrop-filter: blur(10px);
     }
 
-    .game-card { padding: 14px; }
+    .game-card {
+      padding: 14px;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
     .panel { padding: 18px; }
 
     .topbar {
@@ -87,9 +91,18 @@
       line-height: 1.15;
     }
 
+    .stage {
+      flex: 1;
+      min-height: 0;
+      display: grid;
+      place-items: center;
+    }
+
     canvas {
       width: 100%;
-      aspect-ratio: 480 / 760;
+      height: 100%;
+      max-width: 100%;
+      max-height: 100%;
       display: block;
       background:
         linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)),
@@ -176,7 +189,20 @@
       border: 0;
     }
 
+    .panel {
+      display: none;
+    }
+
     @media (max-width: 840px) {
-      .shell { grid-template-columns: 1fr; }
       .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      body {
+        padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+      }
+      .shell {
+        width: 100%;
+        height: 100dvh;
+      }
+      .game-card {
+        border-radius: 0;
+      }
     }
