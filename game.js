@@ -232,11 +232,20 @@
       }
 
       function resizeCanvas() {
-        const rect = canvas.getBoundingClientRect();
-        const cssWidth = Math.max(280, Math.floor(rect.width || 480));
-        const cssHeight = Math.floor(cssWidth * (CONFIG.baseHeight / CONFIG.baseWidth));
+        const stage = canvas.parentElement;
+        const rect = stage ? stage.getBoundingClientRect() : canvas.getBoundingClientRect();
+        const maxWidth = Math.max(280, Math.floor(rect.width || CONFIG.baseWidth));
+        const maxHeight = Math.max(320, Math.floor(rect.height || CONFIG.baseHeight));
+        const targetAspect = CONFIG.baseWidth / CONFIG.baseHeight;
+        let cssWidth = maxWidth;
+        let cssHeight = Math.floor(cssWidth / targetAspect);
+        if (cssHeight > maxHeight) {
+          cssHeight = maxHeight;
+          cssWidth = Math.floor(cssHeight * targetAspect);
+        }
         const dpr = window.devicePixelRatio || 1;
 
+        canvas.style.width = `${cssWidth}px`;
         canvas.style.height = `${cssHeight}px`;
         canvas.width = Math.floor(cssWidth * dpr);
         canvas.height = Math.floor(cssHeight * dpr);
