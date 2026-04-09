@@ -18,7 +18,7 @@
         failTime: 1.75,
         fixedStep: 1 / 60,
         maxTier: 8,
-        baseRadius: 22,
+        baseRadius: 21,
         explosionRadiusMultiplier: 5.5,
         dangerOffset: 126,
         comboWindow: 1.1,
@@ -31,13 +31,13 @@
 
       const TIERS = [
         { name: 'Triangle',  sides: 3,  radius: 1.00, score: 10,   color: '#62b0ff' },
-        { name: 'Square',    sides: 4,  radius: 1.08, score: 20,   color: '#6ad4ff' },
-        { name: 'Pentagon',  sides: 5,  radius: 1.16, score: 40,   color: '#6bf3d2' },
-        { name: 'Hexagon',   sides: 6,  radius: 1.24, score: 80,   color: '#8af17f' },
-        { name: 'Heptagon',  sides: 7,  radius: 1.32, score: 160,  color: '#d7ec72' },
-        { name: 'Octagon',   sides: 8,  radius: 1.40, score: 320,  color: '#ffd166' },
-        { name: 'Nonagon',   sides: 9,  radius: 1.48, score: 640,  color: '#ff9f6e' },
-        { name: 'Decagon',   sides: 10, radius: 1.56, score: 1000, color: '#ff7196' },
+        { name: 'Square',    sides: 4,  radius: 1.14, score: 20,   color: '#6ad4ff' },
+        { name: 'Pentagon',  sides: 5,  radius: 1.30, score: 40,   color: '#6bf3d2' },
+        { name: 'Hexagon',   sides: 6,  radius: 1.48, score: 80,   color: '#8af17f' },
+        { name: 'Heptagon',  sides: 7,  radius: 1.68, score: 160,  color: '#d7ec72' },
+        { name: 'Octagon',   sides: 8,  radius: 1.92, score: 320,  color: '#ffd166' },
+        { name: 'Nonagon',   sides: 9,  radius: 2.20, score: 640,  color: '#ff9f6e' },
+        { name: 'Decagon',   sides: 10, radius: 2.52, score: 1000, color: '#ff7196' },
       ];
 
       const GameState = {
