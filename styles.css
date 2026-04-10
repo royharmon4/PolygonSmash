@@ -82,12 +82,35 @@ body {
   gap: 5px;
 }
 
+.hud-stack {
+  display: grid;
+  gap: 3px;
+  justify-items: end;
+}
+
+.hud-mini-label {
+  color: rgba(255,255,255,0.42);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+}
+
 .hud-next canvas {
   width: 22px;
   height: 22px;
   border: none;
   border-radius: 0;
   background: transparent;
+}
+
+.hud-polarity {
+  min-width: 12px;
+  text-align: center;
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1;
+  color: rgba(255,255,255,0.82);
 }
 
 .speed-meter {

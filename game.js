@@ -5,8 +5,12 @@
   const bestEl = document.getElementById('best');
   const nextLabelEl = document.getElementById('nextLabel');
   const ceilingSpeedFillEl = document.getElementById('ceilingSpeedFill');
+  const currentCanvas = document.getElementById('currentCanvas');
+  const currentCtx = currentCanvas.getContext('2d');
   const nextCanvas = document.getElementById('nextCanvas');
   const nextCtx = nextCanvas.getContext('2d');
+  const currentPolarityEl = document.getElementById('currentPolarity');
+  const nextPolarityEl = document.getElementById('nextPolarity');
   const tierListEl = document.getElementById('tierList');
   const restartBtn = document.getElementById('restartBtn');
   const pauseBtn = document.getElementById('pauseBtn');
@@ -30,6 +34,9 @@
   const WALL_BOUNCE = 0.22; // more wall bounce — messier stacking
   const PAIR_BOUNCE = 0.15; // pieces jostle each other more
   const MERGE_RELATIVE_SPEED = 320;
+  const POLARITY_FORCE_BASE = 180;
+  const POLARITY_FORCE_MAX = 60;
+  const POLARITY_FORCE_RANGE_MULT = 2.2;
   const LAUNCH_COOLDOWN = 0.42; // slower fire rate — can't spam out of trouble
   const FIXED_STEP = 1 / 60;
   const MAX_TIER = 8;
@@ -79,6 +86,8 @@
   let best = Number(localStorage.getItem('polygon-pop-best') || '0');
   let nextTier = 1; // what fires next (shown on barrel)
   let queueTier = 1; // what fires after that (shown in NEXT panel)
+  let nextPolarity = 1;
+  let queuePolarity = 1;
   let launchCooldown = 0;
   let ceilingY = CEILING_START_Y;
   let ceilingSpeed = CEILING_BASE_SPEED;
@@ -217,24 +226,23 @@
     pauseBtn.textContent = 'Pause';
     nextTier = randomSpawnTier();
     queueTier = randomSpawnTier();
+    nextPolarity = randomPolarity();
+    queuePolarity = randomPolarity();
     updateHud();
   }
 
   function updateHud() {
     scoreEl.textContent = Math.floor(score).toLocaleString();
     bestEl.textContent = Math.floor(best).toLocaleString();
-    const tier = tierData(queueTier);
-    nextLabelEl.textContent = tier.name;
+    const currentTierData = tierData(nextTier);
+    const queuedTierData = tierData(queueTier);
+    nextLabelEl.textContent = queuedTierData.name;
     const speedPct = clamp((ceilingSpeed - CEILING_BASE_SPEED) / (CEILING_MAX_SPEED - CEILING_BASE_SPEED), 0, 1);
     ceilingSpeedFillEl.style.width = `${Math.round((0.15 + speedPct * 0.85) * 100)}%`;
-    // draw mini polygon on the small canvas
-    nextCtx.clearRect(0, 0, 22, 22);
-    regularPolygonCtx(nextCtx, 11, 11, 9, tier.sides, -Math.PI / 2);
-    nextCtx.fillStyle = tier.color;
-    nextCtx.fill();
-    nextCtx.lineWidth = 1.5;
-    nextCtx.strokeStyle = 'rgba(255,255,255,0.8)';
-    nextCtx.stroke();
+    drawHudPiece(currentCtx, currentTierData, nextPolarity);
+    drawHudPiece(nextCtx, queuedTierData, queuePolarity);
+    currentPolarityEl.textContent = polaritySymbol(nextPolarity);
+    nextPolarityEl.textContent = polaritySymbol(queuePolarity);
   }
 
   function regularPolygonCtx(c, cx, cy, r, sides, rotation) {
@@ -255,6 +263,41 @@
     return 3;
   }
 
+  function randomPolarity() {
+    return Math.random() < 0.5 ? 1 : -1;
+  }
+
+  function polaritySymbol(polarity) {
+    return polarity > 0 ? '+' : '−';
+  }
+
+  function polarityTint(polarity, alpha = 0.65) {
+    return polarity > 0 ? `rgba(110, 190, 255, ${alpha})` : `rgba(255, 167, 84, ${alpha})`;
+  }
+
+  function mergedPolarity(aPolarity, bPolarity) {
+    if (aPolarity > 0 && bPolarity > 0) return -1;
+    return 1;
+  }
+
+  function drawHudPiece(c, tier, polarity) {
+    c.clearRect(0, 0, 22, 22);
+    regularPolygonCtx(c, 11, 11, 9, tier.sides, -Math.PI / 2);
+    c.fillStyle = tier.color;
+    c.fill();
+    c.lineWidth = 1.5;
+    c.strokeStyle = 'rgba(255,255,255,0.8)';
+    c.stroke();
+    c.fillStyle = 'rgba(255,255,255,0.6)';
+    c.font = '700 12px Inter, sans-serif';
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.fillText(polaritySymbol(polarity), 11, 11.5);
+    c.strokeStyle = polarityTint(polarity, 0.5);
+    c.lineWidth = 1;
+    c.stroke();
+  }
+
   function tierData(tier) {
     return TIERS[tier - 1];
   }
@@ -262,7 +305,7 @@
     return BASE_RADIUS * tierData(tier).radius;
   }
 
-  function createPiece(x, y, tier, vx = 0, vy = 0) {
+  function createPiece(x, y, tier, vx = 0, vy = 0, polarity = 1) {
     return {
       id: nextId++,
       x,
@@ -276,6 +319,7 @@
       merged: false,
       mergeFlash: 0,
       mergeFlashMax: 0.15,
+      polarity,
     };
   }
 
@@ -289,12 +333,14 @@
     // spawn just inside the bottom edge
     const x = clamp(LAUNCHER_X + dx * 28, WELL.left + r, WELL.right - r);
     const y = clamp(LAUNCHER_Y + dy * 10, ceilingY + r, WELL.bottom - r);
-    pieces.push(createPiece(x, y, tier, dx * 760, dy * 760));
+    pieces.push(createPiece(x, y, tier, dx * 760, dy * 760, nextPolarity));
     addDirectionalBurst(x, y, 7, tierData(tier).color, -dx, -dy, 0.5, 80, 170);
     launchCooldown = LAUNCH_COOLDOWN;
     playLaunchSound();
     nextTier = queueTier;
+    nextPolarity = queuePolarity;
     queueTier = randomSpawnTier();
+    queuePolarity = randomPolarity();
     updateHud();
   }
 
@@ -436,7 +482,14 @@
         }
 
         const newTier = tier + 1;
-        const piece = createPiece(mx, my, newTier, (a.vx + b.vx) * 0.18, (a.vy + b.vy) * 0.18);
+        const piece = createPiece(
+          mx,
+          my,
+          newTier,
+          (a.vx + b.vx) * 0.18,
+          (a.vy + b.vy) * 0.18,
+          mergedPolarity(a.polarity, b.polarity),
+        );
         piece.cooldown = 0.16;
         piece.mergeFlash = piece.mergeFlashMax;
         pieces.push(piece);
@@ -583,6 +636,30 @@
     ceilingSpeed = Math.min(CEILING_MAX_SPEED, CEILING_BASE_SPEED + elapsedTime * CEILING_SPEED_RAMP);
     ceilingY += ceilingSpeed * dt;
 
+    for (let i = 0; i < pieces.length; i++) {
+      for (let j = i + 1; j < pieces.length; j++) {
+        const a = pieces[i];
+        const b = pieces[j];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const distSq = dx * dx + dy * dy;
+        if (distSq <= 0.0001) continue;
+        const dist = Math.sqrt(distSq);
+        const range = (a.r + b.r) * POLARITY_FORCE_RANGE_MULT;
+        if (dist > range) continue;
+        const forceMag = Math.min(POLARITY_FORCE_MAX, POLARITY_FORCE_BASE / distSq);
+        const nx = dx / dist;
+        const ny = dy / dist;
+        const dir = a.polarity === b.polarity ? -1 : 1;
+        const dvx = nx * forceMag * dt * dir;
+        const dvy = ny * forceMag * dt * dir;
+        a.vx -= dvx;
+        a.vy -= dvy;
+        b.vx += dvx;
+        b.vy += dvy;
+      }
+    }
+
     for (const piece of pieces) {
       piece.age += dt;
       piece.cooldown = Math.max(0, piece.cooldown - dt);
@@ -705,10 +782,18 @@
     ctx.fill();
     ctx.lineWidth = 3;
     ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+    ctx.shadowColor = polarityTint(piece.polarity, 0.8);
+    ctx.shadowBlur = 9;
     ctx.stroke();
+    ctx.shadowBlur = 0;
     regularPolygon(0, 0, piece.r * 0.52, tier.sides, Math.PI / tier.sides);
     ctx.fillStyle = 'rgba(255,255,255,0.16)';
     ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.font = `700 ${Math.max(12, piece.r * 0.6)}px Inter, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(polaritySymbol(piece.polarity), 0, 1);
     ctx.restore();
   }
 
@@ -765,6 +850,11 @@
     regularPolygon(tipX, tipY, pieceR * 0.52, tier.sides, Math.PI / tier.sides);
     ctx.fillStyle = 'rgba(255,255,255,0.18)';
     ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.62)';
+    ctx.font = `700 ${Math.max(10, pieceR * 0.9)}px Inter, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(polaritySymbol(nextPolarity), tipX, tipY + 1);
 
     ctx.restore();
 
