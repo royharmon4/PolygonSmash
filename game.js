@@ -78,6 +78,117 @@
   let shakeFramesRemaining = 0;
   let paused = false;
   let gameOver = false;
+  let audioCtx = null;
+  let audioMaster = null;
+  let noiseBuffer = null;
+
+  function ensureAudioContext() {
+    if (!window.AudioContext && !window.webkitAudioContext) return null;
+    if (!audioCtx) {
+      const Ctor = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new Ctor();
+      audioMaster = audioCtx.createGain();
+      audioMaster.gain.value = 0.3;
+      audioMaster.connect(audioCtx.destination);
+
+      noiseBuffer = audioCtx.createBuffer(1, Math.floor(audioCtx.sampleRate * 0.4), audioCtx.sampleRate);
+      const data = noiseBuffer.getChannelData(0);
+      for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+    }
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    return audioCtx;
+  }
+
+  function playLaunchSound() {
+    const ac = ensureAudioContext();
+    if (!ac || !audioMaster) return;
+    const now = ac.currentTime;
+    const osc = ac.createOscillator();
+    const gain = ac.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(220, now);
+    osc.frequency.exponentialRampToValueAtTime(110, now + 0.08);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.08, now + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
+    osc.connect(gain);
+    gain.connect(audioMaster);
+    osc.start(now);
+    osc.stop(now + 0.085);
+  }
+
+  function mergeFrequencyForTier(tier) {
+    const clamped = clamp(tier, 1, MAX_TIER);
+    return 300 + ((clamped - 1) / (MAX_TIER - 1)) * (1200 - 300);
+  }
+
+  function playMergePop(tier, delay = 0, freqScale = 1) {
+    const ac = ensureAudioContext();
+    if (!ac || !audioMaster) return;
+    const start = ac.currentTime + delay;
+    const osc = ac.createOscillator();
+    const gain = ac.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(mergeFrequencyForTier(tier) * freqScale, start);
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(0.12, start + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.1);
+    osc.connect(gain);
+    gain.connect(audioMaster);
+    osc.start(start);
+    osc.stop(start + 0.105);
+  }
+
+  function playMergeSound(tier) {
+    playMergePop(tier);
+  }
+
+  function playChainMergeSound(tier) {
+    playMergePop(tier);
+    playMergePop(tier, 0.05, 1.08);
+  }
+
+  function playExplosionSound() {
+    const ac = ensureAudioContext();
+    if (!ac || !audioMaster || !noiseBuffer) return;
+    const now = ac.currentTime;
+    const source = ac.createBufferSource();
+    const bandpass = ac.createBiquadFilter();
+    const gain = ac.createGain();
+    source.buffer = noiseBuffer;
+    bandpass.type = 'bandpass';
+    bandpass.frequency.setValueAtTime(150, now);
+    bandpass.Q.setValueAtTime(0.8, now);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.18, now + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.3);
+    source.connect(bandpass);
+    bandpass.connect(gain);
+    gain.connect(audioMaster);
+    source.start(now);
+    source.stop(now + 0.31);
+  }
+
+  function playGameOverSound() {
+    const ac = ensureAudioContext();
+    if (!ac || !audioMaster) return;
+    const notes = [440, 330, 220];
+    const now = ac.currentTime;
+    for (let i = 0; i < notes.length; i++) {
+      const start = now + i * 0.08;
+      const osc = ac.createOscillator();
+      const gain = ac.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(notes[i], start);
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.11, start + 0.008);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.08);
+      osc.connect(gain);
+      gain.connect(audioMaster);
+      osc.start(start);
+      osc.stop(start + 0.085);
+    }
+  }
 
   function resetGame() {
     pieces = [];
@@ -156,6 +267,7 @@
 
   function launch() {
     if (gameOver || paused || launchCooldown > 0) return;
+    ensureAudioContext();
     const tier = nextTier;
     const r = radiusForTier(tier);
     const dx = Math.cos(aimAngle);
@@ -166,6 +278,7 @@
     pieces.push(createPiece(x, y, tier, dx * 760, dy * 760));
     addDirectionalBurst(x, y, 7, tierData(tier).color, -dx, -dy, 0.5, 80, 170);
     launchCooldown = LAUNCH_COOLDOWN;
+    playLaunchSound();
     nextTier = queueTier;
     queueTier = randomSpawnTier();
     updateHud();
@@ -207,6 +320,7 @@
 
   // Click (pointerup on canvas) → aim + fire
   canvas.addEventListener('pointerup', (e) => {
+    ensureAudioContext();
     const p = clientToCanvas(e.clientX, e.clientY);
     aimAtCanvasPoint(p.x, p.y);
     launch();
@@ -214,6 +328,7 @@
 
   // Also allow click to fire so mouse users get instant feedback on press
   canvas.addEventListener('pointerdown', (e) => {
+    ensureAudioContext();
     const p = clientToCanvas(e.clientX, e.clientY);
     aimAtCanvasPoint(p.x, p.y);
     // Only fire on mouse (not touch — touch fires on touchend below)
@@ -248,6 +363,7 @@
 
   // ── Keyboard ──────────────────────────────────────────────────────────
   window.addEventListener('keydown', (e) => {
+    ensureAudioContext();
     if (e.code === 'Space') {
       e.preventDefault();
       launch();
@@ -274,6 +390,7 @@
   }
 
   function processMerges() {
+    let mergeCount = 0;
     for (const [a, b] of queuedMerges) {
       if (!pieces.includes(a) || !pieces.includes(b)) continue;
       const mx = (a.x + b.x) * 0.5;
@@ -292,11 +409,18 @@
       pieces.push(piece);
       score += tierData(newTier).score;
       addPulse(mx, my, piece.r + 10, tierData(newTier).color, 0.25);
+      if (mergeCount === 0) {
+        playMergeSound(newTier);
+      } else {
+        playChainMergeSound(newTier);
+      }
+      mergeCount++;
     }
     queuedMerges = [];
   }
 
   function explode(x, y) {
+    playExplosionSound();
     const survivors = [];
     let cleared = 0;
     for (const piece of pieces) {
@@ -471,6 +595,7 @@
 
     if (failTimer >= FAIL_TIME && !gameOver) {
       gameOver = true;
+      playGameOverSound();
       best = Math.max(best, Math.floor(score));
       localStorage.setItem('polygon-pop-best', String(best));
       updateHud();
