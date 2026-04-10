@@ -4,6 +4,7 @@
   const scoreEl = document.getElementById('score');
   const bestEl = document.getElementById('best');
   const nextLabelEl = document.getElementById('nextLabel');
+  const ceilingSpeedFillEl = document.getElementById('ceilingSpeedFill');
   const nextCanvas = document.getElementById('nextCanvas');
   const nextCtx = nextCanvas.getContext('2d');
   const tierListEl = document.getElementById('tierList');
@@ -20,13 +21,16 @@
   const LAUNCHER_X = WIDTH / 2;
 
   const DANGER_Y = HEIGHT - 180; // danger line higher — less headroom
+  const CEILING_START_Y = WELL.top;
+  const CEILING_BASE_SPEED = 8;
+  const CEILING_MAX_SPEED = 18;
+  const CEILING_SPEED_RAMP = 0.035;
   const GRAVITY = -640;
   const AIR_DRAG = 0.999; // less drag — pieces stay bouncy/chaotic longer
   const WALL_BOUNCE = 0.22; // more wall bounce — messier stacking
   const PAIR_BOUNCE = 0.15; // pieces jostle each other more
   const MERGE_RELATIVE_SPEED = 320;
   const LAUNCH_COOLDOWN = 0.42; // slower fire rate — can't spam out of trouble
-  const FAIL_TIME = 1.1; // less grace time below the danger line
   const FIXED_STEP = 1 / 60;
   const MAX_TIER = 8;
   const BASE_RADIUS = 24; // slightly bigger pieces — board fills faster
@@ -76,7 +80,9 @@
   let nextTier = 1; // what fires next (shown on barrel)
   let queueTier = 1; // what fires after that (shown in NEXT panel)
   let launchCooldown = 0;
-  let failTimer = 0;
+  let ceilingY = CEILING_START_Y;
+  let ceilingSpeed = CEILING_BASE_SPEED;
+  let elapsedTime = 0;
   let lastTime = 0;
   let accumulator = 0;
   let shakeFramesRemaining = 0;
@@ -200,8 +206,10 @@
     queuedMerges = [];
     nextId = 1;
     score = 0;
-    failTimer = 0;
     launchCooldown = 0;
+    ceilingY = CEILING_START_Y;
+    ceilingSpeed = CEILING_BASE_SPEED;
+    elapsedTime = 0;
     shakeFramesRemaining = 0;
     gameOver = false;
     paused = false;
@@ -217,6 +225,8 @@
     bestEl.textContent = Math.floor(best).toLocaleString();
     const tier = tierData(queueTier);
     nextLabelEl.textContent = tier.name;
+    const speedPct = clamp((ceilingSpeed - CEILING_BASE_SPEED) / (CEILING_MAX_SPEED - CEILING_BASE_SPEED), 0, 1);
+    ceilingSpeedFillEl.style.width = `${Math.round((0.15 + speedPct * 0.85) * 100)}%`;
     // draw mini polygon on the small canvas
     nextCtx.clearRect(0, 0, 22, 22);
     regularPolygonCtx(nextCtx, 11, 11, 9, tier.sides, -Math.PI / 2);
@@ -278,7 +288,7 @@
     const dy = Math.sin(aimAngle);
     // spawn just inside the bottom edge
     const x = clamp(LAUNCHER_X + dx * 28, WELL.left + r, WELL.right - r);
-    const y = clamp(LAUNCHER_Y + dy * 10, WELL.top + r, WELL.bottom - r);
+    const y = clamp(LAUNCHER_Y + dy * 10, ceilingY + r, WELL.bottom - r);
     pieces.push(createPiece(x, y, tier, dx * 760, dy * 760));
     addDirectionalBurst(x, y, 7, tierData(tier).color, -dx, -dy, 0.5, 80, 170);
     launchCooldown = LAUNCH_COOLDOWN;
@@ -420,6 +430,7 @@
         chainConsumed.add(b.id);
 
         if (tier >= MAX_TIER) {
+          pushCeilingUp(tier);
           explode(mx, my);
           continue;
         }
@@ -438,6 +449,7 @@
           playChainMergeSound(newTier);
         }
         mergeCount++;
+        pushCeilingUp(tier);
       }
 
       // Chain merges: newly spawned pieces can immediately merge again when touching same-tier pieces.
@@ -463,6 +475,16 @@
         }
       }
     }
+  }
+
+  function mergeCeilingPush(tier) {
+    const normalized = clamp(tier, 1, 7);
+    const t = (normalized - 1) / 6;
+    return 14 + t * (40 - 14);
+  }
+
+  function pushCeilingUp(mergeTier) {
+    ceilingY = Math.max(CEILING_START_Y, ceilingY - mergeCeilingPush(mergeTier));
   }
 
   function explode(x, y) {
@@ -557,6 +579,9 @@
 
   function stepPhysics(dt) {
     launchCooldown = Math.max(0, launchCooldown - dt);
+    elapsedTime += dt;
+    ceilingSpeed = Math.min(CEILING_MAX_SPEED, CEILING_BASE_SPEED + elapsedTime * CEILING_SPEED_RAMP);
+    ceilingY += ceilingSpeed * dt;
 
     for (const piece of pieces) {
       piece.age += dt;
@@ -577,8 +602,8 @@
         piece.x = WELL.right - piece.r;
         if (piece.vx > 0) piece.vx *= -WALL_BOUNCE;
       }
-      if (piece.y - piece.r < WELL.top) {
-        piece.y = WELL.top + piece.r;
+      if (piece.y - piece.r < ceilingY) {
+        piece.y = ceilingY + piece.r;
         if (piece.vy < 0) piece.vy *= -WALL_BOUNCE;
       }
       if (piece.y + piece.r > WELL.bottom) {
@@ -635,17 +660,13 @@
 
     processMerges();
 
-    // Fail timer
-    const danger = pieces.some((p) => p.y + p.r > DANGER_Y);
-    failTimer = danger ? failTimer + dt : Math.max(0, failTimer - dt * 2.5);
-
-    if (failTimer >= FAIL_TIME && !gameOver) {
+    if (ceilingY >= DANGER_Y && !gameOver) {
       gameOver = true;
       playGameOverSound();
       best = Math.max(best, Math.floor(score));
       localStorage.setItem('polygon-pop-best', String(best));
       updateHud();
-      addBurst(WIDTH / 2, DANGER_Y, 28, '#ff7777');
+      addBurst(WIDTH / 2, ceilingY, 28, '#ff7777');
     }
 
     if (!gameOver) {
@@ -783,7 +804,7 @@
     let travel = Infinity;
 
     if (dirY < 0) {
-      const topT = (WELL.top + r - startY) / dirY;
+      const topT = (ceilingY + r - startY) / dirY;
       if (topT >= 0) travel = Math.min(travel, topT);
     }
     if (dirX < 0) {
@@ -819,6 +840,29 @@
     ctx.fillStyle = 'rgba(255,255,255,0.15)';
     ctx.fill();
     ctx.restore();
+  }
+
+  function drawCeiling() {
+    const pulse = 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(performance.now() * 0.0032));
+    const lineY = ceilingY;
+    const shadowHeight = 72;
+
+    const shadow = ctx.createLinearGradient(0, lineY, 0, lineY + shadowHeight);
+    shadow.addColorStop(0, `rgba(109, 219, 255, ${0.24 * pulse})`);
+    shadow.addColorStop(0.5, `rgba(109, 219, 255, ${0.1 * pulse})`);
+    shadow.addColorStop(1, 'rgba(109, 219, 255, 0)');
+    ctx.fillStyle = shadow;
+    ctx.fillRect(WELL.left + 8, lineY, WELL.right - WELL.left - 16, shadowHeight);
+
+    ctx.strokeStyle = `rgba(137, 233, 255, ${0.76 + 0.2 * pulse})`;
+    ctx.shadowColor = `rgba(86, 208, 255, ${0.55 + 0.3 * pulse})`;
+    ctx.shadowBlur = 18;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(WELL.left + 10, lineY);
+    ctx.lineTo(WELL.right - 10, lineY);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
   }
 
   function overlayMessage(title, subtitle) {
@@ -880,16 +924,7 @@
     ctx.lineWidth = 2;
     roundRect(WELL.left, WELL.top, WELL.right - WELL.left, WELL.bottom - WELL.top, 20, false, true);
 
-    // Danger zone
-    const dangerAlpha = 0.35 + Math.min(0.65, failTimer / FAIL_TIME);
-    ctx.strokeStyle = `rgba(255,96,96,${dangerAlpha})`;
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(WELL.left + 10, DANGER_Y);
-    ctx.lineTo(WELL.right - 10, DANGER_Y);
-    ctx.stroke();
-    ctx.fillStyle = `rgba(255,96,96,${0.08 + dangerAlpha * 0.08})`;
-    ctx.fillRect(WELL.left + 4, DANGER_Y, WELL.right - WELL.left - 8, WELL.bottom - DANGER_Y);
+    drawCeiling();
 
     // Aim line & launcher
     drawAimLine();

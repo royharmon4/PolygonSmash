@@ -18,6 +18,12 @@
           <div class="hud-label">Best</div>
           <div class="hud-value gold" id="best">0</div>
         </div>
+        <div class="hud-group speed">
+          <div class="hud-label">Ceiling Speed</div>
+          <div class="speed-meter" aria-label="ceiling speed meter">
+            <div class="speed-fill" id="ceilingSpeedFill"></div>
+          </div>
+        </div>
         <div class="hud-group right">
           <div class="hud-label">Next</div>
           <div class="hud-next">
@@ -41,7 +47,8 @@
         <ul>
           <li>Matching shapes that touch will merge into the next tier.</li>
           <li>Gravity pulls <strong>upward</strong> — the pile grows down from the ceiling.</li>
-          <li>Don't let the stack sit below the red line for too long.</li>
+          <li>Merges push the descending ceiling back upward.</li>
+          <li>If the ceiling reaches the danger threshold, it's game over.</li>
           <li>Two decagons explode and clear nearby pieces.</li>
         </ul>
       </div>
