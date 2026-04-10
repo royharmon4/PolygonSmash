@@ -3,6 +3,7 @@
   const ctx = canvas.getContext('2d');
   const scoreEl = document.getElementById('score');
   const bestEl = document.getElementById('best');
+  const levelEl = document.getElementById('level');
   const nextLabelEl = document.getElementById('nextLabel');
   const ceilingSpeedFillEl = document.getElementById('ceilingSpeedFill');
   const currentCanvas = document.getElementById('currentCanvas');
@@ -29,6 +30,11 @@
   const CEILING_BASE_SPEED = 8;
   const CEILING_MAX_SPEED = 18;
   const CEILING_SPEED_RAMP = 0.035;
+  const LEVEL_SCORE_STEP = 800;
+  const CEILING_LEVEL_SPEED_MULT = 1.06;
+  const POLARITY_LEVEL_FORCE_MULT = 1.05;
+  const LEVEL_UP_FLASH_DURATION = 1;
+  const LEVEL_UP_REWARD_PUSH = 30;
   const GRAVITY = -640;
   const AIR_DRAG = 0.999; // less drag — pieces stay bouncy/chaotic longer
   const WALL_BOUNCE = 0.22; // more wall bounce — messier stacking
@@ -83,6 +89,7 @@
   let queuedMerges = [];
   let nextId = 1;
   let score = 0;
+  let level = 1;
   let best = Number(localStorage.getItem('polygon-pop-best') || '0');
   let nextTier = 1; // what fires next (shown on barrel)
   let queueTier = 1; // what fires after that (shown in NEXT panel)
@@ -97,6 +104,7 @@
   let shakeFramesRemaining = 0;
   let paused = false;
   let gameOver = false;
+  let levelUpFlash = 0;
   let audioCtx = null;
   let audioMaster = null;
   let noiseBuffer = null;
@@ -215,12 +223,14 @@
     queuedMerges = [];
     nextId = 1;
     score = 0;
+    level = 1;
     launchCooldown = 0;
     ceilingY = CEILING_START_Y;
     ceilingSpeed = CEILING_BASE_SPEED;
     elapsedTime = 0;
     shakeFramesRemaining = 0;
     gameOver = false;
+    levelUpFlash = 0;
     paused = false;
     aimAngle = -Math.PI / 2;
     pauseBtn.textContent = 'Pause';
@@ -234,6 +244,7 @@
   function updateHud() {
     scoreEl.textContent = Math.floor(score).toLocaleString();
     bestEl.textContent = Math.floor(best).toLocaleString();
+    levelEl.textContent = String(level);
     const currentTierData = tierData(nextTier);
     const queuedTierData = tierData(queueTier);
     nextLabelEl.textContent = queuedTierData.name;
@@ -257,10 +268,37 @@
   }
 
   function randomSpawnTier() {
+    const t = clamp((level - 1) / 4, 0, 1);
+    const tier1Weight = 0.7 + (0.45 - 0.7) * t;
+    const tier2Weight = 0.25 + (0.35 - 0.25) * t;
     const roll = Math.random();
-    if (roll < 0.7) return 1;
-    if (roll < 0.95) return 2;
+    if (roll < tier1Weight) return 1;
+    if (roll < tier1Weight + tier2Weight) return 2;
     return 3;
+  }
+
+  function levelForScore(currentScore) {
+    return Math.floor(Math.max(0, currentScore) / LEVEL_SCORE_STEP) + 1;
+  }
+
+  function syncDifficultyFromScore() {
+    const targetLevel = levelForScore(score);
+    if (targetLevel <= level) return;
+    for (let gainedLevel = level + 1; gainedLevel <= targetLevel; gainedLevel++) {
+      if (gainedLevel % 3 === 0) {
+        levelUpFlash = LEVEL_UP_FLASH_DURATION;
+        ceilingY = Math.max(CEILING_START_Y, ceilingY - LEVEL_UP_REWARD_PUSH);
+      }
+    }
+    level = targetLevel;
+  }
+
+  function ceilingLevelMultiplier() {
+    return Math.pow(CEILING_LEVEL_SPEED_MULT, Math.max(0, level - 1));
+  }
+
+  function polarityLevelMultiplier() {
+    return Math.pow(POLARITY_LEVEL_FORCE_MULT, Math.max(0, level - 1));
   }
 
   function randomPolarity() {
@@ -614,6 +652,7 @@
 
   // ── Physics step ──────────────────────────────────────────────────────
   function stepEffects(dt) {
+    levelUpFlash = Math.max(0, levelUpFlash - dt);
     for (let i = effects.length - 1; i >= 0; i--) {
       const fx = effects[i];
       fx.life -= dt;
@@ -633,7 +672,8 @@
   function stepPhysics(dt) {
     launchCooldown = Math.max(0, launchCooldown - dt);
     elapsedTime += dt;
-    ceilingSpeed = Math.min(CEILING_MAX_SPEED, CEILING_BASE_SPEED + elapsedTime * CEILING_SPEED_RAMP);
+    const baseSpeed = Math.min(CEILING_MAX_SPEED, CEILING_BASE_SPEED + elapsedTime * CEILING_SPEED_RAMP);
+    ceilingSpeed = baseSpeed * ceilingLevelMultiplier();
     ceilingY += ceilingSpeed * dt;
 
     for (let i = 0; i < pieces.length; i++) {
@@ -647,7 +687,9 @@
         const dist = Math.sqrt(distSq);
         const range = (a.r + b.r) * POLARITY_FORCE_RANGE_MULT;
         if (dist > range) continue;
-        const forceMag = Math.min(POLARITY_FORCE_MAX, POLARITY_FORCE_BASE / distSq);
+        const polarityForceBase = POLARITY_FORCE_BASE * polarityLevelMultiplier();
+        const polarityForceMax = POLARITY_FORCE_MAX * polarityLevelMultiplier();
+        const forceMag = Math.min(polarityForceMax, polarityForceBase / distSq);
         const nx = dx / dist;
         const ny = dy / dist;
         const dir = a.polarity === b.polarity ? -1 : 1;
@@ -736,6 +778,7 @@
     }
 
     processMerges();
+    syncDifficultyFromScore();
 
     if (ceilingY >= DANGER_Y && !gameOver) {
       gameOver = true;
@@ -967,6 +1010,21 @@
     ctx.fillText(subtitle, WIDTH / 2, HEIGHT / 2 + 24);
   }
 
+  function drawLevelUpFlash() {
+    if (levelUpFlash <= 0 || level % 3 !== 0) return;
+    const alpha = clamp(levelUpFlash / LEVEL_UP_FLASH_DURATION, 0, 1);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = '900 60px Inter, sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.shadowColor = 'rgba(125,255,179,0.95)';
+    ctx.shadowBlur = 18;
+    ctx.fillText('LEVEL UP', WIDTH / 2, HEIGHT / 2);
+    ctx.restore();
+  }
+
   // ── Main draw ─────────────────────────────────────────────────────────
   function draw() {
     ctx.clearRect(0, 0, WIDTH, HEIGHT);
@@ -1046,6 +1104,7 @@
 
     if (paused && !gameOver) overlayMessage('PAUSED', 'Press Pause again to resume');
     if (gameOver) overlayMessage('GAME OVER', 'Press Restart to play again');
+    drawLevelUpFlash();
 
     ctx.restore();
     ctx.restore();
