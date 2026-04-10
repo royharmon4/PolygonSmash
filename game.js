@@ -390,33 +390,75 @@
   }
 
   function processMerges() {
+    const chainConsumed = new Set();
     let mergeCount = 0;
-    for (const [a, b] of queuedMerges) {
-      if (!pieces.includes(a) || !pieces.includes(b)) continue;
-      const mx = (a.x + b.x) * 0.5;
-      const my = (a.y + b.y) * 0.5;
-      const tier = a.tier;
-      removePiece(a);
-      removePiece(b);
-      if (tier >= MAX_TIER) {
-        explode(mx, my);
-        continue;
+    while (queuedMerges.length > 0) {
+      const mergesThisPass = queuedMerges;
+      queuedMerges = [];
+      const spawnedPieces = [];
+
+      for (const [a, b] of mergesThisPass) {
+        if (
+          !pieces.includes(a) ||
+          !pieces.includes(b) ||
+          chainConsumed.has(a.id) ||
+          chainConsumed.has(b.id)
+        ) {
+          continue;
+        }
+
+        const mx = (a.x + b.x) * 0.5;
+        const my = (a.y + b.y) * 0.5;
+        const tier = a.tier;
+        removePiece(a);
+        removePiece(b);
+        chainConsumed.add(a.id);
+        chainConsumed.add(b.id);
+
+        if (tier >= MAX_TIER) {
+          explode(mx, my);
+          continue;
+        }
+
+        const newTier = tier + 1;
+        const piece = createPiece(mx, my, newTier, (a.vx + b.vx) * 0.18, (a.vy + b.vy) * 0.18);
+        piece.cooldown = 0.16;
+        piece.mergeFlash = piece.mergeFlashMax;
+        pieces.push(piece);
+        spawnedPieces.push(piece);
+        score += tierData(newTier).score;
+        addPulse(mx, my, piece.r + 10, tierData(newTier).color, 0.25);
+        if (mergeCount === 0) {
+          playMergeSound(newTier);
+        } else {
+          playChainMergeSound(newTier);
+        }
+        mergeCount++;
       }
-      const newTier = tier + 1;
-      const piece = createPiece(mx, my, newTier, (a.vx + b.vx) * 0.18, (a.vy + b.vy) * 0.18);
-      piece.cooldown = 0.16;
-      piece.mergeFlash = piece.mergeFlashMax;
-      pieces.push(piece);
-      score += tierData(newTier).score;
-      addPulse(mx, my, piece.r + 10, tierData(newTier).color, 0.25);
-      if (mergeCount === 0) {
-        playMergeSound(newTier);
-      } else {
-        playChainMergeSound(newTier);
+
+      // Chain merges: newly spawned pieces can immediately merge again when touching same-tier pieces.
+      for (const piece of spawnedPieces) {
+        if (!pieces.includes(piece) || chainConsumed.has(piece.id) || piece.merged) continue;
+
+        for (const candidate of pieces) {
+          if (
+            candidate.id === piece.id ||
+            candidate.tier !== piece.tier ||
+            candidate.merged ||
+            chainConsumed.has(candidate.id)
+          ) {
+            continue;
+          }
+
+          const dx = candidate.x - piece.x;
+          const dy = candidate.y - piece.y;
+          const minDist = candidate.r + piece.r;
+          if (dx * dx + dy * dy > minDist * minDist) continue;
+          queueMerge(piece, candidate);
+          break;
+        }
       }
-      mergeCount++;
     }
-    queuedMerges = [];
   }
 
   function explode(x, y) {
