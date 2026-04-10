@@ -75,6 +75,7 @@
   let failTimer = 0;
   let lastTime = 0;
   let accumulator = 0;
+  let shakeFramesRemaining = 0;
   let paused = false;
   let gameOver = false;
 
@@ -86,6 +87,7 @@
     score = 0;
     failTimer = 0;
     launchCooldown = 0;
+    shakeFramesRemaining = 0;
     gameOver = false;
     paused = false;
     aimAngle = -Math.PI / 2;
@@ -136,7 +138,20 @@
   }
 
   function createPiece(x, y, tier, vx = 0, vy = 0) {
-    return { id: nextId++, x, y, vx, vy, tier, r: radiusForTier(tier), age: 0, cooldown: 0.14, merged: false };
+    return {
+      id: nextId++,
+      x,
+      y,
+      vx,
+      vy,
+      tier,
+      r: radiusForTier(tier),
+      age: 0,
+      cooldown: 0.14,
+      merged: false,
+      mergeFlash: 0,
+      mergeFlashMax: 0.15,
+    };
   }
 
   function launch() {
@@ -149,6 +164,7 @@
     const x = clamp(LAUNCHER_X + dx * 28, WELL.left + r, WELL.right - r);
     const y = clamp(LAUNCHER_Y + dy * 10, WELL.top + r, WELL.bottom - r);
     pieces.push(createPiece(x, y, tier, dx * 760, dy * 760));
+    addDirectionalBurst(x, y, 7, tierData(tier).color, -dx, -dy, 0.5, 80, 170);
     launchCooldown = LAUNCH_COOLDOWN;
     nextTier = queueTier;
     queueTier = randomSpawnTier();
@@ -272,6 +288,7 @@
       const newTier = tier + 1;
       const piece = createPiece(mx, my, newTier, (a.vx + b.vx) * 0.18, (a.vy + b.vy) * 0.18);
       piece.cooldown = 0.16;
+      piece.mergeFlash = piece.mergeFlashMax;
       pieces.push(piece);
       score += tierData(newTier).score;
       addPulse(mx, my, piece.r + 10, tierData(newTier).color, 0.25);
@@ -301,6 +318,7 @@
     score += 1000 + cleared * 50;
     addPulse(x, y, EXPLOSION_RADIUS, '#ffd3a8', 0.55);
     addBurst(x, y, 24, '#ffd3a8');
+    shakeFramesRemaining = Math.max(shakeFramesRemaining, 3 + Math.floor(Math.random() * 2));
   }
 
   function removePiece(piece) {
@@ -330,6 +348,25 @@
     }
   }
 
+  function addDirectionalBurst(x, y, count, color, dirX, dirY, spread = 0.45, speedMin = 90, speedMax = 180) {
+    const baseAngle = Math.atan2(dirY, dirX);
+    for (let i = 0; i < count; i++) {
+      const angle = baseAngle + (Math.random() * 2 - 1) * spread;
+      const speed = speedMin + Math.random() * (speedMax - speedMin);
+      effects.push({
+        type: 'spark',
+        x,
+        y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 0.2 + Math.random() * 0.15,
+        maxLife: 0.35,
+        color,
+        size: 1.5 + Math.random() * 2,
+      });
+    }
+  }
+
   // ── Physics step ──────────────────────────────────────────────────────
   function stepEffects(dt) {
     for (let i = effects.length - 1; i >= 0; i--) {
@@ -354,6 +391,7 @@
     for (const piece of pieces) {
       piece.age += dt;
       piece.cooldown = Math.max(0, piece.cooldown - dt);
+      piece.mergeFlash = Math.max(0, piece.mergeFlash - dt);
       piece.vy += GRAVITY * dt;
       piece.vx *= AIR_DRAG;
       piece.vy *= AIR_DRAG;
@@ -463,8 +501,15 @@
     ctx.save();
     ctx.translate(piece.x, piece.y);
     ctx.rotate(baseRot);
+    let flashMix = 0;
+    if (piece.mergeFlash > 0) {
+      const t = 1 - piece.mergeFlash / piece.mergeFlashMax;
+      const scale = t < 0.5 ? 1 + t * 0.4 : 1.2 - (t - 0.5) * 0.4;
+      ctx.scale(scale, scale);
+      flashMix = 1 - t;
+    }
     regularPolygon(0, 0, piece.r * 0.92, tier.sides, 0);
-    ctx.fillStyle = tier.color;
+    ctx.fillStyle = flashMix > 0 ? `rgba(255,255,255,${flashMix})` : tier.color;
     ctx.fill();
     ctx.lineWidth = 3;
     ctx.strokeStyle = 'rgba(255,255,255,0.85)';
@@ -555,6 +600,12 @@
   // ── Main draw ─────────────────────────────────────────────────────────
   function draw() {
     ctx.clearRect(0, 0, WIDTH, HEIGHT);
+    ctx.save();
+    if (shakeFramesRemaining > 0) {
+      const shakeX = (Math.random() * 2 - 1) * 3;
+      const shakeY = (Math.random() * 2 - 1) * 3;
+      ctx.translate(shakeX, shakeY);
+    }
 
     // Well background
     const grad = ctx.createLinearGradient(0, WELL.top, 0, WELL.bottom);
@@ -635,6 +686,7 @@
     if (gameOver) overlayMessage('GAME OVER', 'Press Restart to play again');
 
     ctx.restore();
+    ctx.restore();
   }
 
   // ── Game loop ─────────────────────────────────────────────────────────
@@ -661,6 +713,7 @@
     }
 
     draw();
+    if (shakeFramesRemaining > 0) shakeFramesRemaining--;
     updateHud();
     requestAnimationFrame(frame);
   }
