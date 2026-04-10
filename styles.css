@@ -75,6 +75,7 @@ body {
 }
 
 .hud-value.gold { color: #ffd166; }
+.hud-value.level { color: #7dffb3; }
 
 .hud-next {
   display: flex;
