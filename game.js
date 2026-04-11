@@ -5,7 +5,6 @@
   const bestEl = document.getElementById('best');
   const levelEl = document.getElementById('level');
   const ceilingSpeedFillEl = document.getElementById('ceilingSpeedFill');
-  const tierListEl = document.getElementById('tierList');
   const restartBtn = document.getElementById('restartBtn');
   const pauseBtn = document.getElementById('pauseBtn');
 
@@ -93,16 +92,6 @@
     };
   });
   const MAX_TIER = TIERS.length;
-
-  tierListEl.innerHTML = TIERS.map(
-    (tier, i) => `
-        <div class="tier-row">
-          <div class="dot" style="background:${tier.color}"></div>
-          <div>${i + 1}. ${tier.name}</div>
-          <div class="pill">${tier.score} pts</div>
-        </div>
-      `,
-  ).join('');
 
   // FIX 1 & 2: separate aim state from touch-fire state
   // aimAngle is updated continuously; firing only happens on pointerup / touchend
@@ -1061,7 +1050,7 @@
       bestStreak: bestStreakThisRun,
     };
     const panelW = WELL.right - WELL.left - 36;
-    const panelH = 320;
+    const panelH = 384;
     const panelX = WELL.left + (WELL.right - WELL.left - panelW) / 2;
     const panelY = WELL.top + 70;
     ctx.fillStyle = 'rgba(3,7,16,0.8)';
