@@ -48,11 +48,6 @@
   const MAX_TIER = 8;
   const BASE_RADIUS = 24; // slightly bigger pieces — board fills faster
   const EXPLOSION_RADIUS = BASE_RADIUS * 3.8; // smaller blast — decagon less OP
-  const IS_TOUCH_DEVICE =
-    window.matchMedia('(pointer: coarse)').matches ||
-    'ontouchstart' in window ||
-    navigator.maxTouchPoints > 0;
-
   const BACKGROUND_STARS = Array.from({ length: 36 }, (_, i) => ({
     x: (i * 73) % WIDTH,
     y: (i * 127) % HEIGHT,
@@ -924,57 +919,6 @@
     ctx.stroke();
   }
 
-  function predictGhostPosition() {
-    const tier = nextTier;
-    const r = radiusForTier(tier);
-    const barrelLen = 44;
-    const pieceR = radiusForTier(nextTier) * 0.72;
-    const tipDistance = barrelLen + pieceR + 4;
-    const dirX = Math.cos(aimAngle);
-    const dirY = Math.sin(aimAngle);
-    const startX = LAUNCHER_X + dirX * tipDistance;
-    const startY = LAUNCHER_Y + dirY * tipDistance;
-    let travel = Infinity;
-
-    if (dirY < 0) {
-      const topT = (ceilingY + r - startY) / dirY;
-      if (topT >= 0) travel = Math.min(travel, topT);
-    }
-    if (dirX < 0) {
-      const leftT = (WELL.left + r - startX) / dirX;
-      if (leftT >= 0) travel = Math.min(travel, leftT);
-    } else if (dirX > 0) {
-      const rightT = (WELL.right - r - startX) / dirX;
-      if (rightT >= 0) travel = Math.min(travel, rightT);
-    }
-
-    if (!Number.isFinite(travel)) travel = 0;
-    return {
-      x: startX + dirX * travel,
-      y: startY + dirY * travel,
-      tier,
-    };
-  }
-
-  function drawGhostPiece() {
-    if (!IS_TOUCH_DEVICE) return;
-    const ghost = predictGhostPosition();
-    const tier = tierData(ghost.tier);
-    const r = radiusForTier(ghost.tier);
-    ctx.save();
-    ctx.globalAlpha = 0.28;
-    regularPolygon(ghost.x, ghost.y, r * 0.92, tier.sides, -Math.PI / 2);
-    ctx.fillStyle = tier.color;
-    ctx.fill();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = 'rgba(255,255,255,0.45)';
-    ctx.stroke();
-    regularPolygon(ghost.x, ghost.y, r * 0.52, tier.sides, Math.PI / tier.sides);
-    ctx.fillStyle = 'rgba(255,255,255,0.15)';
-    ctx.fill();
-    ctx.restore();
-  }
-
   function drawCeiling() {
     const pulse = 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(performance.now() * 0.0032));
     const lineY = ceilingY;
@@ -1076,7 +1020,6 @@
 
     // Aim line & launcher
     drawAimLine();
-    drawGhostPiece();
     drawLauncher();
 
     // Pieces
