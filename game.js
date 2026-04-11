@@ -432,14 +432,18 @@
       return;
     }
     aimAtCanvasPoint(p.x, p.y);
-    launch();
+    // Mouse launches on pointerdown for snappy controls; touch/pen launch on release.
+    if (e.pointerType !== 'mouse') launch();
   });
 
   // Also allow click to fire so mouse users get instant feedback on press
   canvas.addEventListener('pointerdown', (e) => {
     ensureAudioContext();
     const p = clientToCanvas(e.clientX, e.clientY);
-    if (gamePhase === 'results' && isInResultsButton(p.x, p.y)) return;
+    if (gamePhase === 'results' && isInResultsButton(p.x, p.y)) {
+      resetGame();
+      return;
+    }
     aimAtCanvasPoint(p.x, p.y);
     // Only fire on mouse (not touch — touch fires on touchend below)
     if (e.pointerType === 'mouse') launch();
@@ -462,6 +466,8 @@
     'touchend',
     (e) => {
       e.preventDefault();
+      // Browsers with Pointer Events already fire via pointer handlers above.
+      if ('PointerEvent' in window) return;
       // Use changedTouches for the final position
       const t = e.changedTouches[0];
       const p = clientToCanvas(t.clientX, t.clientY);
@@ -492,6 +498,7 @@
 
   restartBtn.addEventListener('click', resetGame);
   pauseBtn.addEventListener('click', () => {
+    if (gamePhase !== 'playing') return;
     paused = !paused;
     pauseBtn.textContent = paused ? 'Resume' : 'Pause';
   });
