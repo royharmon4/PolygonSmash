@@ -43,7 +43,7 @@
   const POLARITY_FORCE_RANGE_MULT = 2.2;
   const LAUNCH_COOLDOWN = 0.42; // slower fire rate — can't spam out of trouble
   const FIXED_STEP = 1 / 60;
-  const MAX_TIER = 8;
+  const MAX_SIDES = 100;
   const BASE_RADIUS = 24; // slightly bigger pieces — board fills faster
   const EXPLOSION_RADIUS = BASE_RADIUS * 3.8; // smaller blast — decagon less OP
   const BACKGROUND_STARS = Array.from({ length: 36 }, (_, i) => ({
@@ -53,16 +53,46 @@
     a: 0.15 + (i % 5) * 0.08,
   }));
 
-  const TIERS = [
-    { name: 'Triangle', sides: 3, radius: 1.0, score: 10, color: '#62b0ff' },
-    { name: 'Square', sides: 4, radius: 1.12, score: 20, color: '#6ad4ff' },
-    { name: 'Pentagon', sides: 5, radius: 1.26, score: 40, color: '#6bf3d2' },
-    { name: 'Hexagon', sides: 6, radius: 1.42, score: 80, color: '#8af17f' },
-    { name: 'Heptagon', sides: 7, radius: 1.6, score: 160, color: '#d7ec72' },
-    { name: 'Octagon', sides: 8, radius: 1.82, score: 320, color: '#ffd166' },
-    { name: 'Nonagon', sides: 9, radius: 2.08, score: 640, color: '#ff9f6e' },
-    { name: 'Decagon', sides: 10, radius: 2.38, score: 1000, color: '#ff7196' },
-  ];
+  const NAMED_POLYGONS = {
+    3: 'Triangle',
+    4: 'Square',
+    5: 'Pentagon',
+    6: 'Hexagon',
+    7: 'Heptagon',
+    8: 'Octagon',
+    9: 'Nonagon',
+    10: 'Decagon',
+  };
+  const TIER_COLORS = ['#62b0ff', '#6ad4ff', '#6bf3d2', '#8af17f', '#d7ec72', '#ffd166', '#ff9f6e', '#ff7196'];
+
+  function polygonName(sides) {
+    return NAMED_POLYGONS[sides] || `${sides}-gon`;
+  }
+
+  function tierRadius(sides) {
+    if (sides <= 10) {
+      return [1.0, 1.12, 1.26, 1.42, 1.6, 1.82, 2.08, 2.38][sides - 3];
+    }
+    return 2.38 + (sides - 10) * 0.015;
+  }
+
+  function tierScore(sides) {
+    if (sides <= 9) return 10 * 2 ** (sides - 3);
+    if (sides === 10) return 1000;
+    return Math.round(1000 * 1.22 ** (sides - 10));
+  }
+
+  const TIERS = Array.from({ length: MAX_SIDES - 2 }, (_, i) => {
+    const sides = i + 3;
+    return {
+      name: polygonName(sides),
+      sides,
+      radius: tierRadius(sides),
+      score: tierScore(sides),
+      color: TIER_COLORS[i % TIER_COLORS.length],
+    };
+  });
+  const MAX_TIER = TIERS.length;
 
   tierListEl.innerHTML = TIERS.map(
     (tier, i) => `
