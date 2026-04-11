@@ -29,7 +29,7 @@ body {
 .shell {
   width: min(100%, 960px);
   display: grid;
-  grid-template-columns: minmax(300px, 520px) minmax(240px, 320px);
+  grid-template-columns: 480px minmax(240px, 320px);
   gap: 18px;
   align-items: start;
 }
@@ -133,7 +133,8 @@ body {
 }
 
 canvas {
-  width: 100%;
+  width: 480px;
+  max-width: 100%;
   height: auto;
   display: block;
   background:
