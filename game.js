@@ -28,6 +28,11 @@
   const POLARITY_LEVEL_FORCE_MULT = 1.05;
   const LEVEL_UP_FLASH_DURATION = 1;
   const LEVEL_UP_REWARD_PUSH = 30;
+  const GAME_OVER_SLAM_DURATION = 0.4;
+  const CLOSE_CALL_WINDOW = 5;
+  const CLOSE_CALL_DANGER_DISTANCE = 60;
+  const CLOSE_CALL_FADE_DURATION = 2.2;
+  const STREAK_THRESHOLD = DANGER_Y - 120;
   const GRAVITY = -640;
   const AIR_DRAG = 0.999; // less drag — pieces stay bouncy/chaotic longer
   const WALL_BOUNCE = 0.22; // more wall bounce — messier stacking
@@ -92,6 +97,16 @@
   let shakeFramesRemaining = 0;
   let paused = false;
   let gameOver = false;
+  let gamePhase = 'playing'; // playing | slamming | results
+  let gameOverAnimTime = 0;
+  let ceilingSlamStartY = CEILING_START_Y;
+  let resultsButtonRect = null;
+  let bestTierThisRun = 1;
+  let bestStreakThisRun = 0;
+  let currentSafeStreak = 0;
+  let lastNearDangerTime = -Infinity;
+  let closeCallTimer = 0;
+  let finalRunStats = null;
   let levelUpFlash = 0;
   let audioCtx = null;
   let audioMaster = null;
@@ -218,6 +233,15 @@
     elapsedTime = 0;
     shakeFramesRemaining = 0;
     gameOver = false;
+    gamePhase = 'playing';
+    gameOverAnimTime = 0;
+    resultsButtonRect = null;
+    bestTierThisRun = 1;
+    bestStreakThisRun = 0;
+    currentSafeStreak = 0;
+    lastNearDangerTime = -Infinity;
+    closeCallTimer = 0;
+    finalRunStats = null;
     levelUpFlash = 0;
     paused = false;
     aimAngle = -Math.PI / 2;
@@ -325,7 +349,7 @@
   }
 
   function launch() {
-    if (gameOver || paused || launchCooldown > 0) return;
+    if (gamePhase !== 'playing' || paused || launchCooldown > 0) return;
     ensureAudioContext();
     const tier = nextTier;
     const r = radiusForTier(tier);
@@ -335,6 +359,7 @@
     const x = clamp(LAUNCHER_X + dx * 28, WELL.left + r, WELL.right - r);
     const y = clamp(LAUNCHER_Y + dy * 10, ceilingY + r, WELL.bottom - r);
     pieces.push(createPiece(x, y, tier, dx * 760, dy * 760, nextPolarity));
+    bestTierThisRun = Math.max(bestTierThisRun, tier);
     addDirectionalBurst(x, y, 7, tierData(tier).color, -dx, -dy, 0.5, 80, 170);
     launchCooldown = LAUNCH_COOLDOWN;
     playLaunchSound();
@@ -383,6 +408,10 @@
   canvas.addEventListener('pointerup', (e) => {
     ensureAudioContext();
     const p = clientToCanvas(e.clientX, e.clientY);
+    if (gamePhase === 'results' && isInResultsButton(p.x, p.y)) {
+      resetGame();
+      return;
+    }
     aimAtCanvasPoint(p.x, p.y);
     launch();
   });
@@ -391,6 +420,7 @@
   canvas.addEventListener('pointerdown', (e) => {
     ensureAudioContext();
     const p = clientToCanvas(e.clientX, e.clientY);
+    if (gamePhase === 'results' && isInResultsButton(p.x, p.y)) return;
     aimAtCanvasPoint(p.x, p.y);
     // Only fire on mouse (not touch — touch fires on touchend below)
     if (e.pointerType === 'mouse') launch();
@@ -416,6 +446,10 @@
       // Use changedTouches for the final position
       const t = e.changedTouches[0];
       const p = clientToCanvas(t.clientX, t.clientY);
+      if (gamePhase === 'results' && isInResultsButton(p.x, p.y)) {
+        resetGame();
+        return;
+      }
       aimAtCanvasPoint(p.x, p.y);
       launch();
     },
@@ -431,6 +465,7 @@
     }
     if (e.code === 'KeyR') resetGame();
     if (e.code === 'KeyP') {
+      if (gamePhase !== 'playing') return;
       paused = !paused;
       pauseBtn.textContent = paused ? 'Resume' : 'Pause';
     }
@@ -483,6 +518,7 @@
         }
 
         const newTier = tier + 1;
+        bestTierThisRun = Math.max(bestTierThisRun, newTier);
         const piece = createPiece(
           mx,
           my,
@@ -538,7 +574,10 @@
   }
 
   function pushCeilingUp(mergeTier) {
+    const before = ceilingY;
     ceilingY = Math.max(CEILING_START_Y, ceilingY - mergeCeilingPush(mergeTier));
+    const savedFromDanger = before - ceilingY > 0.1 && elapsedTime - lastNearDangerTime <= CLOSE_CALL_WINDOW;
+    if (savedFromDanger) closeCallTimer = CLOSE_CALL_FADE_DURATION;
   }
 
   function explode(x, y) {
@@ -616,6 +655,7 @@
   // ── Physics step ──────────────────────────────────────────────────────
   function stepEffects(dt) {
     levelUpFlash = Math.max(0, levelUpFlash - dt);
+    closeCallTimer = Math.max(0, closeCallTimer - dt);
     for (let i = effects.length - 1; i >= 0; i--) {
       const fx = effects[i];
       fx.life -= dt;
@@ -638,6 +678,15 @@
     const baseSpeed = Math.min(CEILING_MAX_SPEED, CEILING_BASE_SPEED + elapsedTime * CEILING_SPEED_RAMP);
     ceilingSpeed = baseSpeed * ceilingLevelMultiplier();
     ceilingY += ceilingSpeed * dt;
+    if (DANGER_Y - ceilingY <= CLOSE_CALL_DANGER_DISTANCE) {
+      lastNearDangerTime = elapsedTime;
+    }
+    if (ceilingY < STREAK_THRESHOLD) {
+      currentSafeStreak += dt;
+      bestStreakThisRun = Math.max(bestStreakThisRun, currentSafeStreak);
+    } else {
+      currentSafeStreak = 0;
+    }
 
     for (let i = 0; i < pieces.length; i++) {
       for (let j = i + 1; j < pieces.length; j++) {
@@ -744,17 +793,43 @@
     syncDifficultyFromScore();
 
     if (ceilingY >= DANGER_Y && !gameOver) {
-      gameOver = true;
-      playGameOverSound();
-      best = Math.max(best, Math.floor(score));
-      localStorage.setItem('polygon-pop-best', String(best));
-      updateHud();
-      addBurst(WIDTH / 2, ceilingY, 28, '#ff7777');
+      triggerGameOver();
     }
 
     if (!gameOver) {
       best = Math.max(best, Math.floor(score));
       localStorage.setItem('polygon-pop-best', String(best));
+    }
+  }
+
+  function triggerGameOver() {
+    gameOver = true;
+    gamePhase = 'slamming';
+    gameOverAnimTime = 0;
+    ceilingSlamStartY = ceilingY;
+    playGameOverSound();
+    best = Math.max(best, Math.floor(score));
+    localStorage.setItem('polygon-pop-best', String(best));
+    updateHud();
+    addBurst(WIDTH / 2, ceilingY, 28, '#ff7777');
+    finalRunStats = {
+      score: Math.floor(score),
+      best,
+      level,
+      bestTier: bestTierThisRun,
+      bestStreak: bestStreakThisRun,
+    };
+  }
+
+  function stepGameOverSlam(dt) {
+    if (gamePhase !== 'slamming') return;
+    gameOverAnimTime += dt;
+    const t = clamp(gameOverAnimTime / GAME_OVER_SLAM_DURATION, 0, 1);
+    const eased = t * t * t;
+    ceilingY = ceilingSlamStartY + (WELL.bottom - ceilingSlamStartY) * eased;
+    if (t >= 1) {
+      ceilingY = WELL.bottom;
+      gamePhase = 'results';
     }
   }
 
@@ -922,6 +997,82 @@
     ctx.fillText(subtitle, WIDTH / 2, HEIGHT / 2 + 24);
   }
 
+  function drawCloseCallBanner() {
+    if (closeCallTimer <= 0 || gamePhase !== 'playing') return;
+    const alpha = clamp(closeCallTimer / CLOSE_CALL_FADE_DURATION, 0, 1);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = '900 56px Inter, sans-serif';
+    ctx.fillStyle = '#ffe788';
+    ctx.shadowColor = 'rgba(255,180,80,0.95)';
+    ctx.shadowBlur = 16;
+    ctx.fillText('CLOSE CALL', WIDTH / 2, HEIGHT * 0.32);
+    ctx.restore();
+  }
+
+  function isInResultsButton(x, y) {
+    if (!resultsButtonRect) return false;
+    return (
+      x >= resultsButtonRect.x &&
+      x <= resultsButtonRect.x + resultsButtonRect.w &&
+      y >= resultsButtonRect.y &&
+      y <= resultsButtonRect.y + resultsButtonRect.h
+    );
+  }
+
+  function drawResultsOverlay() {
+    const stats = finalRunStats || {
+      score: Math.floor(score),
+      best,
+      level,
+      bestTier: bestTierThisRun,
+      bestStreak: bestStreakThisRun,
+    };
+    const panelW = WELL.right - WELL.left - 36;
+    const panelH = 320;
+    const panelX = WELL.left + (WELL.right - WELL.left - panelW) / 2;
+    const panelY = WELL.top + 70;
+    ctx.fillStyle = 'rgba(3,7,16,0.8)';
+    ctx.fillRect(WELL.left, WELL.top, WELL.right - WELL.left, WELL.bottom - WELL.top);
+    ctx.fillStyle = 'rgba(15,25,46,0.96)';
+    ctx.strokeStyle = 'rgba(166,209,255,0.55)';
+    ctx.lineWidth = 2;
+    roundRect(panelX, panelY, panelW, panelH, 20, true, true);
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#f1f7ff';
+    ctx.font = '900 34px Inter, sans-serif';
+    ctx.fillText('RUN OVER', WIDTH / 2, panelY + 42);
+
+    const tierInfo = tierData(stats.bestTier);
+    const rows = [
+      `Final Score: ${stats.score.toLocaleString()}`,
+      `Best Score: ${stats.best.toLocaleString()}`,
+      `Highest Tier: ${stats.bestTier} (${tierInfo.name})`,
+      `Level Reached: ${stats.level}`,
+      `Best Streak: ${stats.bestStreak.toFixed(1)}s`,
+    ];
+    ctx.font = '600 20px Inter, sans-serif';
+    ctx.fillStyle = '#bed6ff';
+    rows.forEach((line, idx) => ctx.fillText(line, WIDTH / 2, panelY + 94 + idx * 36));
+
+    const btnW = panelW - 80;
+    const btnH = 58;
+    const btnX = panelX + (panelW - btnW) / 2;
+    const btnY = panelY + panelH - btnH - 20;
+    resultsButtonRect = { x: btnX, y: btnY, w: btnW, h: btnH };
+    ctx.fillStyle = '#65d89e';
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+    ctx.lineWidth = 2.5;
+    roundRect(btnX, btnY, btnW, btnH, 14, true, true);
+    ctx.fillStyle = '#08291a';
+    ctx.font = '900 30px Inter, sans-serif';
+    ctx.fillText('PLAY AGAIN', WIDTH / 2, btnY + btnH / 2 + 1);
+  }
+
   function drawLevelUpFlash() {
     if (levelUpFlash <= 0 || level % 3 !== 0) return;
     const alpha = clamp(levelUpFlash / LEVEL_UP_FLASH_DURATION, 0, 1);
@@ -1013,8 +1164,9 @@
     }
     ctx.globalAlpha = 1;
 
-    if (paused && !gameOver) overlayMessage('PAUSED', 'Press Pause again to resume');
-    if (gameOver) overlayMessage('GAME OVER', 'Press Restart to play again');
+    if (paused && gamePhase === 'playing') overlayMessage('PAUSED', 'Press Pause again to resume');
+    if (gamePhase === 'results') drawResultsOverlay();
+    drawCloseCallBanner();
     drawLevelUpFlash();
 
     ctx.restore();
@@ -1028,7 +1180,7 @@
     lastTime = ts;
     accumulator += dt;
 
-    if (!paused && !gameOver) {
+    if (!paused && gamePhase === 'playing') {
       while (accumulator >= FIXED_STEP) {
         stepPhysics(FIXED_STEP);
         stepEffects(FIXED_STEP);
@@ -1041,6 +1193,7 @@
       }
     } else {
       accumulator = 0;
+      if (gamePhase === 'slamming') stepGameOverSlam(dt);
       stepEffects(dt);
     }
 
