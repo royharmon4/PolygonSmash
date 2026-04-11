@@ -4,14 +4,7 @@
   const scoreEl = document.getElementById('score');
   const bestEl = document.getElementById('best');
   const levelEl = document.getElementById('level');
-  const nextLabelEl = document.getElementById('nextLabel');
   const ceilingSpeedFillEl = document.getElementById('ceilingSpeedFill');
-  const currentCanvas = document.getElementById('currentCanvas');
-  const currentCtx = currentCanvas.getContext('2d');
-  const nextCanvas = document.getElementById('nextCanvas');
-  const nextCtx = nextCanvas.getContext('2d');
-  const currentPolarityEl = document.getElementById('currentPolarity');
-  const nextPolarityEl = document.getElementById('nextPolarity');
   const tierListEl = document.getElementById('tierList');
   const restartBtn = document.getElementById('restartBtn');
   const pauseBtn = document.getElementById('pauseBtn');
@@ -240,15 +233,8 @@
     scoreEl.textContent = Math.floor(score).toLocaleString();
     bestEl.textContent = Math.floor(best).toLocaleString();
     levelEl.textContent = String(level);
-    const currentTierData = tierData(nextTier);
-    const queuedTierData = tierData(queueTier);
-    nextLabelEl.textContent = queuedTierData.name;
     const speedPct = clamp((ceilingSpeed - CEILING_BASE_SPEED) / (CEILING_MAX_SPEED - CEILING_BASE_SPEED), 0, 1);
     ceilingSpeedFillEl.style.width = `${Math.round((0.15 + speedPct * 0.85) * 100)}%`;
-    drawHudPiece(currentCtx, currentTierData, nextPolarity);
-    drawHudPiece(nextCtx, queuedTierData, queuePolarity);
-    currentPolarityEl.textContent = polaritySymbol(nextPolarity);
-    nextPolarityEl.textContent = polaritySymbol(queuePolarity);
   }
 
   function regularPolygonCtx(c, cx, cy, r, sides, rotation) {
@@ -311,24 +297,6 @@
   function mergedPolarity(aPolarity, bPolarity) {
     if (aPolarity > 0 && bPolarity > 0) return -1;
     return 1;
-  }
-
-  function drawHudPiece(c, tier, polarity) {
-    c.clearRect(0, 0, 22, 22);
-    regularPolygonCtx(c, 11, 11, 9, tier.sides, -Math.PI / 2);
-    c.fillStyle = tier.color;
-    c.fill();
-    c.lineWidth = 1.5;
-    c.strokeStyle = 'rgba(255,255,255,0.8)';
-    c.stroke();
-    c.fillStyle = 'rgba(255,255,255,0.6)';
-    c.font = '700 12px Inter, sans-serif';
-    c.textAlign = 'center';
-    c.textBaseline = 'middle';
-    c.fillText(polaritySymbol(polarity), 11, 11.5);
-    c.strokeStyle = polarityTint(polarity, 0.5);
-    c.lineWidth = 1;
-    c.stroke();
   }
 
   function tierData(tier) {
