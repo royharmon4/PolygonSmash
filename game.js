@@ -22,11 +22,6 @@
   const CEILING_BASE_SPEED = 8;
   const CEILING_MAX_SPEED = 18;
   const CEILING_SPEED_RAMP = 0.035;
-  const LEVEL_SCORE_STEP = 800;
-  const CEILING_LEVEL_SPEED_MULT = 1.06;
-  const POLARITY_LEVEL_FORCE_MULT = 1.05;
-  const LEVEL_UP_FLASH_DURATION = 1;
-  const LEVEL_UP_REWARD_PUSH = 30;
   const GAME_OVER_SLAM_DURATION = 0.4;
   const CLOSE_CALL_WINDOW = 5;
   const CLOSE_CALL_DANGER_DISTANCE = 60;
@@ -42,7 +37,6 @@
   const POLARITY_FORCE_RANGE_MULT = 2.2;
   const LAUNCH_COOLDOWN = 0.42; // slower fire rate — can't spam out of trouble
   const FIXED_STEP = 1 / 60;
-  const MAX_SIDES = 100;
   const BASE_RADIUS = 24; // slightly bigger pieces — board fills faster
   const EXPLOSION_RADIUS = BASE_RADIUS * 3.8; // smaller blast — decagon less OP
   const BACKGROUND_STARS = Array.from({ length: 36 }, (_, i) => ({
@@ -52,45 +46,30 @@
     a: 0.15 + (i % 5) * 0.08,
   }));
 
-  const NAMED_POLYGONS = {
-    3: 'Triangle',
-    4: 'Square',
-    5: 'Pentagon',
-    6: 'Hexagon',
-    7: 'Heptagon',
-    8: 'Octagon',
-    9: 'Nonagon',
-    10: 'Decagon',
-  };
-  const TIER_COLORS = ['#62b0ff', '#6ad4ff', '#6bf3d2', '#8af17f', '#d7ec72', '#ffd166', '#ff9f6e', '#ff7196'];
-
-  function polygonName(sides) {
-    return NAMED_POLYGONS[sides] || `${sides}-gon`;
-  }
-
-  function tierRadius(sides) {
-    if (sides <= 10) {
-      return [1.0, 1.12, 1.26, 1.42, 1.6, 1.82, 2.08, 2.38][sides - 3];
-    }
-    return 2.38 + (sides - 10) * 0.015;
-  }
-
-  function tierScore(sides) {
-    if (sides <= 9) return 10 * 2 ** (sides - 3);
-    if (sides === 10) return 1000;
-    return Math.round(1000 * 1.22 ** (sides - 10));
-  }
-
-  const TIERS = Array.from({ length: MAX_SIDES - 2 }, (_, i) => {
-    const sides = i + 3;
-    return {
-      name: polygonName(sides),
-      sides,
-      radius: tierRadius(sides),
-      score: tierScore(sides),
-      color: TIER_COLORS[i % TIER_COLORS.length],
-    };
-  });
+  const TIERS = [
+    { name: 'Triangle', sides: 3, radius: 1.0, score: 10, color: '#62b0ff', capstone: null },
+    { name: 'Square', sides: 4, radius: 1.12, score: 30, color: '#6ad4ff', capstone: null },
+    { name: 'Pentagon', sides: 5, radius: 1.26, score: 75, color: '#6bf3d2', capstone: null },
+    { name: 'Hexagon', sides: 6, radius: 1.42, score: 180, color: '#8af17f', capstone: null },
+    { name: 'Heptagon', sides: 7, radius: 1.6, score: 420, color: '#d7ec72', capstone: null },
+    { name: 'Octagon', sides: 8, radius: 1.82, score: 950, color: '#ffd166', capstone: null },
+    { name: 'Nonagon', sides: 9, radius: 2.06, score: 2100, color: '#ff9f6e', capstone: null },
+    { name: 'Decagon', sides: 10, radius: 2.26, score: 4800, color: '#ff7196', capstone: null },
+    { name: 'Hendecagon', sides: 11, radius: 2.42, score: 11000, color: '#f784ff', capstone: null },
+    {
+      name: 'Dodecagon',
+      sides: 12,
+      radius: 2.58,
+      score: 25000,
+      color: '#ff5f7f',
+      capstone: { behavior: 'explode_on_match', mergeScore: 25000, clearedTierScore: 120 },
+    },
+  ];
+  const NATURAL_SPAWN_WEIGHTS = [
+    { tier: 1, weight: 0.68 },
+    { tier: 2, weight: 0.24 },
+    { tier: 3, weight: 0.08 },
+  ];
   const MAX_TIER = TIERS.length;
 
   // FIX 1 & 2: separate aim state from touch-fire state
@@ -101,7 +80,6 @@
   let queuedMerges = [];
   let nextId = 1;
   let score = 0;
-  let level = 1;
   let best = Number(localStorage.getItem('polygon-pop-best') || '0');
   let nextTier = 1; // what fires next (shown on barrel)
   let queueTier = 1; // what fires after that (shown in NEXT panel)
@@ -126,7 +104,6 @@
   let lastNearDangerTime = -Infinity;
   let closeCallTimer = 0;
   let finalRunStats = null;
-  let levelUpFlash = 0;
   let audioCtx = null;
   let audioMaster = null;
   let noiseBuffer = null;
@@ -245,7 +222,6 @@
     queuedMerges = [];
     nextId = 1;
     score = 0;
-    level = 1;
     launchCooldown = 0;
     ceilingY = CEILING_START_Y;
     ceilingSpeed = CEILING_BASE_SPEED;
@@ -261,7 +237,6 @@
     lastNearDangerTime = -Infinity;
     closeCallTimer = 0;
     finalRunStats = null;
-    levelUpFlash = 0;
     paused = false;
     aimAngle = -Math.PI / 2;
     pauseBtn.textContent = 'Pause';
@@ -275,7 +250,7 @@
   function updateHud() {
     scoreEl.textContent = Math.floor(score).toLocaleString();
     bestEl.textContent = Math.floor(best).toLocaleString();
-    levelEl.textContent = String(level);
+    levelEl.textContent = String(MAX_TIER);
     const speedPct = clamp((ceilingSpeed - CEILING_BASE_SPEED) / (CEILING_MAX_SPEED - CEILING_BASE_SPEED), 0, 1);
     ceilingSpeedFillEl.style.width = `${Math.round((0.15 + speedPct * 0.85) * 100)}%`;
   }
@@ -292,37 +267,20 @@
   }
 
   function randomSpawnTier() {
-    const t = clamp((level - 1) / 4, 0, 1);
-    const tier1Weight = 0.7 + (0.45 - 0.7) * t;
-    const tier2Weight = 0.25 + (0.35 - 0.25) * t;
     const roll = Math.random();
-    if (roll < tier1Weight) return 1;
-    if (roll < tier1Weight + tier2Weight) return 2;
-    return 3;
-  }
-
-  function levelForScore(currentScore) {
-    return Math.floor(Math.max(0, currentScore) / LEVEL_SCORE_STEP) + 1;
-  }
-
-  function syncDifficultyFromScore() {
-    const targetLevel = levelForScore(score);
-    if (targetLevel <= level) return;
-    for (let gainedLevel = level + 1; gainedLevel <= targetLevel; gainedLevel++) {
-      if (gainedLevel % 3 === 0) {
-        levelUpFlash = LEVEL_UP_FLASH_DURATION;
-        ceilingY = Math.max(CEILING_START_Y, ceilingY - LEVEL_UP_REWARD_PUSH);
-      }
+    let runningWeight = 0;
+    for (const entry of NATURAL_SPAWN_WEIGHTS) {
+      runningWeight += entry.weight;
+      if (roll < runningWeight) return entry.tier;
     }
-    level = targetLevel;
+    return NATURAL_SPAWN_WEIGHTS[NATURAL_SPAWN_WEIGHTS.length - 1].tier;
   }
 
-  function ceilingLevelMultiplier() {
-    return Math.pow(CEILING_LEVEL_SPEED_MULT, Math.max(0, level - 1));
-  }
-
-  function polarityLevelMultiplier() {
-    return Math.pow(POLARITY_LEVEL_FORCE_MULT, Math.max(0, level - 1));
+  function validateSpawnWeights() {
+    const total = NATURAL_SPAWN_WEIGHTS.reduce((sum, entry) => sum + entry.weight, 0);
+    if (Math.abs(total - 1) > 0.001) {
+      throw new Error(`Spawn weights must sum to 1.0. Current total: ${total}`);
+    }
   }
 
   function randomPolarity() {
@@ -537,9 +495,10 @@
         chainConsumed.add(a.id);
         chainConsumed.add(b.id);
 
-        if (tier >= MAX_TIER) {
+        const capstone = tierData(tier).capstone;
+        if (capstone) {
           pushCeilingUp(tier);
-          explode(mx, my);
+          explode(mx, my, capstone);
           continue;
         }
 
@@ -594,8 +553,8 @@
   }
 
   function mergeCeilingPush(tier) {
-    const normalized = clamp(tier, 1, 7);
-    const t = (normalized - 1) / 6;
+    const normalized = clamp(tier, 1, MAX_TIER);
+    const t = (normalized - 1) / (MAX_TIER - 1);
     return 14 + t * (40 - 14);
   }
 
@@ -606,7 +565,7 @@
     if (savedFromDanger) closeCallTimer = CLOSE_CALL_FADE_DURATION;
   }
 
-  function explode(x, y) {
+  function explode(x, y, capstoneConfig = null) {
     playExplosionSound();
     const survivors = [];
     let cleared = 0;
@@ -614,7 +573,7 @@
       const dx = piece.x - x;
       const dy = piece.y - y;
       if (Math.hypot(dx, dy) <= EXPLOSION_RADIUS) {
-        cleared += piece.tier;
+        cleared += capstoneConfig ? piece.tier * capstoneConfig.clearedTierScore : piece.tier;
       } else {
         const dist = Math.max(1, Math.hypot(dx, dy));
         const force = Math.max(0, 1 - (dist - EXPLOSION_RADIUS) / 90);
@@ -626,7 +585,8 @@
       }
     }
     pieces = survivors;
-    score += 1000 + cleared * 50;
+    const capstoneMergeScore = capstoneConfig ? capstoneConfig.mergeScore : 1000;
+    score += capstoneMergeScore + cleared;
     addPulse(x, y, EXPLOSION_RADIUS, '#ffd3a8', 0.55);
     addBurst(x, y, 24, '#ffd3a8');
     shakeFramesRemaining = Math.max(shakeFramesRemaining, 3 + Math.floor(Math.random() * 2));
@@ -680,7 +640,6 @@
 
   // ── Physics step ──────────────────────────────────────────────────────
   function stepEffects(dt) {
-    levelUpFlash = Math.max(0, levelUpFlash - dt);
     closeCallTimer = Math.max(0, closeCallTimer - dt);
     for (let i = effects.length - 1; i >= 0; i--) {
       const fx = effects[i];
@@ -702,7 +661,7 @@
     launchCooldown = Math.max(0, launchCooldown - dt);
     elapsedTime += dt;
     const baseSpeed = Math.min(CEILING_MAX_SPEED, CEILING_BASE_SPEED + elapsedTime * CEILING_SPEED_RAMP);
-    ceilingSpeed = baseSpeed * ceilingLevelMultiplier();
+    ceilingSpeed = baseSpeed;
     ceilingY += ceilingSpeed * dt;
     if (DANGER_Y - ceilingY <= CLOSE_CALL_DANGER_DISTANCE) {
       lastNearDangerTime = elapsedTime;
@@ -725,8 +684,8 @@
         const dist = Math.sqrt(distSq);
         const range = (a.r + b.r) * POLARITY_FORCE_RANGE_MULT;
         if (dist > range) continue;
-        const polarityForceBase = POLARITY_FORCE_BASE * polarityLevelMultiplier();
-        const polarityForceMax = POLARITY_FORCE_MAX * polarityLevelMultiplier();
+        const polarityForceBase = POLARITY_FORCE_BASE;
+        const polarityForceMax = POLARITY_FORCE_MAX;
         const forceMag = Math.min(polarityForceMax, polarityForceBase / distSq);
         const nx = dx / dist;
         const ny = dy / dist;
@@ -816,8 +775,6 @@
     }
 
     processMerges();
-    syncDifficultyFromScore();
-
     if (ceilingY >= DANGER_Y && !gameOver) {
       triggerGameOver();
     }
@@ -841,7 +798,6 @@
     finalRunStats = {
       score: Math.floor(score),
       best,
-      level,
       bestTier: bestTierThisRun,
       bestStreak: bestStreakThisRun,
     };
@@ -1052,7 +1008,6 @@
     const stats = finalRunStats || {
       score: Math.floor(score),
       best,
-      level,
       bestTier: bestTierThisRun,
       bestStreak: bestStreakThisRun,
     };
@@ -1078,7 +1033,7 @@
       `Final Score: ${stats.score.toLocaleString()}`,
       `Best Score: ${stats.best.toLocaleString()}`,
       `Highest Tier: ${stats.bestTier} (${tierInfo.name})`,
-      `Level Reached: ${stats.level}`,
+      `Tier Ladder: ${MAX_TIER} fixed tiers`,
       `Best Streak: ${stats.bestStreak.toFixed(1)}s`,
     ];
     ctx.font = '600 20px Inter, sans-serif';
@@ -1100,18 +1055,7 @@
   }
 
   function drawLevelUpFlash() {
-    if (levelUpFlash <= 0 || level % 3 !== 0) return;
-    const alpha = clamp(levelUpFlash / LEVEL_UP_FLASH_DURATION, 0, 1);
-    ctx.save();
-    ctx.globalAlpha = alpha;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.font = '900 60px Inter, sans-serif';
-    ctx.fillStyle = '#ffffff';
-    ctx.shadowColor = 'rgba(125,255,179,0.95)';
-    ctx.shadowBlur = 18;
-    ctx.fillText('LEVEL UP', WIDTH / 2, HEIGHT / 2);
-    ctx.restore();
+    // Fixed ladder mode has no level-up state.
   }
 
   // ── Main draw ─────────────────────────────────────────────────────────
@@ -1229,6 +1173,7 @@
     requestAnimationFrame(frame);
   }
 
+  validateSpawnWeights();
   resetGame();
   requestAnimationFrame(frame);
 })();
