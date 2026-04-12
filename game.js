@@ -3,7 +3,6 @@
   const ctx = canvas.getContext('2d');
   const scoreEl = document.getElementById('score');
   const bestEl = document.getElementById('best');
-  const levelEl = document.getElementById('level');
   const ceilingSpeedFillEl = document.getElementById('ceilingSpeedFill');
   const restartBtn = document.getElementById('restartBtn');
   const pauseBtn = document.getElementById('pauseBtn');
@@ -250,7 +249,6 @@
   function updateHud() {
     scoreEl.textContent = Math.floor(score).toLocaleString();
     bestEl.textContent = Math.floor(best).toLocaleString();
-    levelEl.textContent = String(MAX_TIER);
     const speedPct = clamp((ceilingSpeed - CEILING_BASE_SPEED) / (CEILING_MAX_SPEED - CEILING_BASE_SPEED), 0, 1);
     ceilingSpeedFillEl.style.width = `${Math.round((0.15 + speedPct * 0.85) * 100)}%`;
   }
@@ -1052,10 +1050,6 @@
     ctx.fillStyle = '#08291a';
     ctx.font = '900 30px Inter, sans-serif';
     ctx.fillText('PLAY AGAIN', WIDTH / 2, btnY + btnH / 2 + 1);
-  }
-
-  function drawLevelUpFlash() {
-    // Fixed ladder mode has no level-up state.
   }
 
   // ── Main draw ─────────────────────────────────────────────────────────
