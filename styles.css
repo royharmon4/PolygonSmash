@@ -74,8 +74,6 @@ body {
 }
 
 .hud-value.gold { color: #ffd166; }
-.hud-value.level { color: #7dffb3; }
-
 .speed-meter {
   width: 108px;
   height: 9px;
