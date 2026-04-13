@@ -3,7 +3,6 @@
   const ctx = canvas.getContext('2d');
   const scoreEl = document.getElementById('score');
   const bestEl = document.getElementById('best');
-  const ceilingSpeedFillEl = document.getElementById('ceilingSpeedFill');
   const restartBtn = document.getElementById('restartBtn');
   const pauseBtn = document.getElementById('pauseBtn');
 
@@ -16,16 +15,9 @@
   const LAUNCHER_Y = WELL.bottom - 30;
   const LAUNCHER_X = WIDTH / 2;
 
-  const DANGER_Y = HEIGHT - 180; // danger line higher — less headroom
-  const CEILING_START_Y = WELL.top;
-  const CEILING_BASE_SPEED = 8;
-  const CEILING_MAX_SPEED = 18;
-  const CEILING_SPEED_RAMP = 0.035;
-  const GAME_OVER_SLAM_DURATION = 0.4;
-  const CLOSE_CALL_WINDOW = 5;
-  const CLOSE_CALL_DANGER_DISTANCE = 60;
-  const CLOSE_CALL_FADE_DURATION = 2.2;
-  const STREAK_THRESHOLD = DANGER_Y - 120;
+  const FIXED_CEILING_Y = WELL.top;
+  const DANGER_Y = HEIGHT - 180;
+  const DANGER_GRACE_SECONDS = 2;
   const GRAVITY = -640;
   const AIR_DRAG = 0.999; // less drag — pieces stay bouncy/chaotic longer
   const WALL_BOUNCE = 0.22; // more wall bounce — messier stacking
@@ -85,23 +77,18 @@
   let nextPolarity = 1;
   let queuePolarity = 1;
   let launchCooldown = 0;
-  let ceilingY = CEILING_START_Y;
-  let ceilingSpeed = CEILING_BASE_SPEED;
-  let elapsedTime = 0;
   let lastTime = 0;
   let accumulator = 0;
   let shakeFramesRemaining = 0;
   let paused = false;
   let gameOver = false;
-  let gamePhase = 'playing'; // playing | slamming | results
-  let gameOverAnimTime = 0;
-  let ceilingSlamStartY = CEILING_START_Y;
+  let gamePhase = 'playing'; // playing | results
   let resultsButtonRect = null;
   let bestTierThisRun = 1;
   let bestStreakThisRun = 0;
   let currentSafeStreak = 0;
-  let lastNearDangerTime = -Infinity;
-  let closeCallTimer = 0;
+  let dangerTimer = 0;
+  let dangerActive = false;
   let finalRunStats = null;
   let audioCtx = null;
   let audioMaster = null;
@@ -222,19 +209,15 @@
     nextId = 1;
     score = 0;
     launchCooldown = 0;
-    ceilingY = CEILING_START_Y;
-    ceilingSpeed = CEILING_BASE_SPEED;
-    elapsedTime = 0;
     shakeFramesRemaining = 0;
     gameOver = false;
     gamePhase = 'playing';
-    gameOverAnimTime = 0;
     resultsButtonRect = null;
     bestTierThisRun = 1;
     bestStreakThisRun = 0;
     currentSafeStreak = 0;
-    lastNearDangerTime = -Infinity;
-    closeCallTimer = 0;
+    dangerTimer = 0;
+    dangerActive = false;
     finalRunStats = null;
     paused = false;
     aimAngle = -Math.PI / 2;
@@ -249,8 +232,6 @@
   function updateHud() {
     scoreEl.textContent = Math.floor(score).toLocaleString();
     bestEl.textContent = Math.floor(best).toLocaleString();
-    const speedPct = clamp((ceilingSpeed - CEILING_BASE_SPEED) / (CEILING_MAX_SPEED - CEILING_BASE_SPEED), 0, 1);
-    ceilingSpeedFillEl.style.width = `${Math.round((0.15 + speedPct * 0.85) * 100)}%`;
   }
 
   function regularPolygonCtx(c, cx, cy, r, sides, rotation) {
@@ -332,7 +313,7 @@
     const dy = Math.sin(aimAngle);
     // spawn just inside the bottom edge
     const x = clamp(LAUNCHER_X + dx * 28, WELL.left + r, WELL.right - r);
-    const y = clamp(LAUNCHER_Y + dy * 10, ceilingY + r, WELL.bottom - r);
+    const y = clamp(LAUNCHER_Y + dy * 10, FIXED_CEILING_Y + r, WELL.bottom - r);
     pieces.push(createPiece(x, y, tier, dx * 760, dy * 760, nextPolarity));
     bestTierThisRun = Math.max(bestTierThisRun, tier);
     addDirectionalBurst(x, y, 7, tierData(tier).color, -dx, -dy, 0.5, 80, 170);
@@ -495,7 +476,6 @@
 
         const capstone = tierData(tier).capstone;
         if (capstone) {
-          pushCeilingUp(tier);
           explode(mx, my, capstone);
           continue;
         }
@@ -522,7 +502,6 @@
           playChainMergeSound(newTier);
         }
         mergeCount++;
-        pushCeilingUp(tier);
       }
 
       // Chain merges: newly spawned pieces can immediately merge again when touching same-tier pieces.
@@ -548,19 +527,6 @@
         }
       }
     }
-  }
-
-  function mergeCeilingPush(tier) {
-    const normalized = clamp(tier, 1, MAX_TIER);
-    const t = (normalized - 1) / (MAX_TIER - 1);
-    return 14 + t * (40 - 14);
-  }
-
-  function pushCeilingUp(mergeTier) {
-    const before = ceilingY;
-    ceilingY = Math.max(CEILING_START_Y, ceilingY - mergeCeilingPush(mergeTier));
-    const savedFromDanger = before - ceilingY > 0.1 && elapsedTime - lastNearDangerTime <= CLOSE_CALL_WINDOW;
-    if (savedFromDanger) closeCallTimer = CLOSE_CALL_FADE_DURATION;
   }
 
   function explode(x, y, capstoneConfig = null) {
@@ -638,7 +604,6 @@
 
   // ── Physics step ──────────────────────────────────────────────────────
   function stepEffects(dt) {
-    closeCallTimer = Math.max(0, closeCallTimer - dt);
     for (let i = effects.length - 1; i >= 0; i--) {
       const fx = effects[i];
       fx.life -= dt;
@@ -657,19 +622,6 @@
 
   function stepPhysics(dt) {
     launchCooldown = Math.max(0, launchCooldown - dt);
-    elapsedTime += dt;
-    const baseSpeed = Math.min(CEILING_MAX_SPEED, CEILING_BASE_SPEED + elapsedTime * CEILING_SPEED_RAMP);
-    ceilingSpeed = baseSpeed;
-    ceilingY += ceilingSpeed * dt;
-    if (DANGER_Y - ceilingY <= CLOSE_CALL_DANGER_DISTANCE) {
-      lastNearDangerTime = elapsedTime;
-    }
-    if (ceilingY < STREAK_THRESHOLD) {
-      currentSafeStreak += dt;
-      bestStreakThisRun = Math.max(bestStreakThisRun, currentSafeStreak);
-    } else {
-      currentSafeStreak = 0;
-    }
 
     for (let i = 0; i < pieces.length; i++) {
       for (let j = i + 1; j < pieces.length; j++) {
@@ -716,8 +668,8 @@
         piece.x = WELL.right - piece.r;
         if (piece.vx > 0) piece.vx *= -WALL_BOUNCE;
       }
-      if (piece.y - piece.r < ceilingY) {
-        piece.y = ceilingY + piece.r;
+      if (piece.y - piece.r < FIXED_CEILING_Y) {
+        piece.y = FIXED_CEILING_Y + piece.r;
         if (piece.vy < 0) piece.vy *= -WALL_BOUNCE;
       }
       if (piece.y + piece.r > WELL.bottom) {
@@ -773,7 +725,23 @@
     }
 
     processMerges();
-    if (ceilingY >= DANGER_Y && !gameOver) {
+
+    let maxPieceBottom = -Infinity;
+    for (const piece of pieces) {
+      maxPieceBottom = Math.max(maxPieceBottom, piece.y + piece.r);
+    }
+
+    dangerActive = maxPieceBottom > DANGER_Y;
+    if (dangerActive) {
+      dangerTimer += dt;
+      currentSafeStreak = 0;
+    } else {
+      dangerTimer = 0;
+      currentSafeStreak += dt;
+      bestStreakThisRun = Math.max(bestStreakThisRun, currentSafeStreak);
+    }
+
+    if (dangerTimer >= DANGER_GRACE_SECONDS && !gameOver) {
       triggerGameOver();
     }
 
@@ -785,32 +753,18 @@
 
   function triggerGameOver() {
     gameOver = true;
-    gamePhase = 'slamming';
-    gameOverAnimTime = 0;
-    ceilingSlamStartY = ceilingY;
+    gamePhase = 'results';
     playGameOverSound();
     best = Math.max(best, Math.floor(score));
     localStorage.setItem('polygon-pop-best', String(best));
     updateHud();
-    addBurst(WIDTH / 2, ceilingY, 28, '#ff7777');
+    addBurst(WIDTH / 2, DANGER_Y, 28, '#ff7777');
     finalRunStats = {
       score: Math.floor(score),
       best,
       bestTier: bestTierThisRun,
       bestStreak: bestStreakThisRun,
     };
-  }
-
-  function stepGameOverSlam(dt) {
-    if (gamePhase !== 'slamming') return;
-    gameOverAnimTime += dt;
-    const t = clamp(gameOverAnimTime / GAME_OVER_SLAM_DURATION, 0, 1);
-    const eased = t * t * t;
-    ceilingY = ceilingSlamStartY + (WELL.bottom - ceilingSlamStartY) * eased;
-    if (t >= 1) {
-      ceilingY = WELL.bottom;
-      gamePhase = 'results';
-    }
   }
 
   // ── Drawing helpers ───────────────────────────────────────────────────
@@ -944,7 +898,7 @@
 
   function drawCeiling() {
     const pulse = 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(performance.now() * 0.0032));
-    const lineY = ceilingY;
+    const lineY = FIXED_CEILING_Y;
     const shadowHeight = 72;
 
     const shadow = ctx.createLinearGradient(0, lineY, 0, lineY + shadowHeight);
@@ -977,18 +931,40 @@
     ctx.fillText(subtitle, WIDTH / 2, HEIGHT / 2 + 24);
   }
 
-  function drawCloseCallBanner() {
-    if (closeCallTimer <= 0 || gamePhase !== 'playing') return;
-    const alpha = clamp(closeCallTimer / CLOSE_CALL_FADE_DURATION, 0, 1);
+  function drawDangerLine() {
+    const warningPulse = 0.5 + 0.5 * Math.sin(performance.now() * 0.012);
+    const isWarning = dangerActive && gamePhase === 'playing';
+    const alpha = isWarning ? 0.72 + warningPulse * 0.28 : 0.45;
+    ctx.strokeStyle = isWarning ? `rgba(255, 96, 96, ${alpha})` : 'rgba(255, 171, 90, 0.5)';
+    ctx.lineWidth = 4;
+    ctx.shadowColor = isWarning ? `rgba(255, 96, 96, ${alpha})` : 'rgba(255, 171, 90, 0.42)';
+    ctx.shadowBlur = isWarning ? 16 : 8;
+    ctx.beginPath();
+    ctx.moveTo(WELL.left + 10, DANGER_Y);
+    ctx.lineTo(WELL.right - 10, DANGER_Y);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    ctx.fillStyle = isWarning ? 'rgba(255, 205, 205, 0.95)' : 'rgba(255, 225, 178, 0.88)';
+    ctx.font = '700 14px Inter, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText('DANGER LINE', WELL.left + 14, DANGER_Y - 8);
+  }
+
+  function drawDangerWarning() {
+    if (!dangerActive || gamePhase !== 'playing') return;
+    const remaining = Math.max(0, DANGER_GRACE_SECONDS - dangerTimer);
+    const alpha = clamp(0.45 + (dangerTimer / DANGER_GRACE_SECONDS) * 0.55, 0.45, 1);
     ctx.save();
     ctx.globalAlpha = alpha;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.font = '900 56px Inter, sans-serif';
-    ctx.fillStyle = '#ffe788';
-    ctx.shadowColor = 'rgba(255,180,80,0.95)';
+    ctx.font = '900 48px Inter, sans-serif';
+    ctx.fillStyle = '#ffd6d6';
+    ctx.shadowColor = 'rgba(255,80,80,0.95)';
     ctx.shadowBlur = 16;
-    ctx.fillText('CLOSE CALL', WIDTH / 2, HEIGHT * 0.32);
+    ctx.fillText(`RECOVER ${remaining.toFixed(1)}s`, WIDTH / 2, HEIGHT * 0.32);
     ctx.restore();
   }
 
@@ -1100,6 +1076,7 @@
     roundRect(WELL.left, WELL.top, WELL.right - WELL.left, WELL.bottom - WELL.top, 20, false, true);
 
     drawCeiling();
+    drawDangerLine();
 
     // Aim line & launcher
     drawAimLine();
@@ -1130,8 +1107,7 @@
 
     if (paused && gamePhase === 'playing') overlayMessage('PAUSED', 'Press Pause again to resume');
     if (gamePhase === 'results') drawResultsOverlay();
-    drawCloseCallBanner();
-    drawLevelUpFlash();
+    drawDangerWarning();
 
     ctx.restore();
     ctx.restore();
@@ -1157,7 +1133,6 @@
       }
     } else {
       accumulator = 0;
-      if (gamePhase === 'slamming') stepGameOverSlam(dt);
       stepEffects(dt);
     }
 
