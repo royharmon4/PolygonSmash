@@ -54,7 +54,6 @@ body {
 
 .hud-group { display: flex; flex-direction: column; align-items: flex-start; }
 .hud-group.center { align-items: center; }
-.hud-group.speed { min-width: 112px; }
 
 .hud-label {
   color: rgba(255,255,255,0.38);
@@ -74,24 +73,6 @@ body {
 }
 
 .hud-value.gold { color: #ffd166; }
-.speed-meter {
-  width: 108px;
-  height: 9px;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.14);
-  border: 1px solid rgba(255,255,255,0.16);
-  overflow: hidden;
-}
-
-.speed-fill {
-  height: 100%;
-  width: 0%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, #6be3ff 0%, #7dffb3 55%, #ffd166 100%);
-  box-shadow: 0 0 10px rgba(125,255,179,0.4);
-  transition: width 120ms linear;
-}
-
 canvas {
   width: 480px;
   max-width: 100%;
