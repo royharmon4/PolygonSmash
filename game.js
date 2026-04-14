@@ -3,6 +3,8 @@
   const ctx = canvas.getContext('2d');
   const scoreEl = document.getElementById('score');
   const bestEl = document.getElementById('best');
+  const queueSlot1El = document.getElementById('queueSlot1');
+  const queueSlot2El = document.getElementById('queueSlot2');
   const restartBtn = document.getElementById('restartBtn');
   const pauseBtn = document.getElementById('pauseBtn');
 
@@ -73,7 +75,7 @@
   let nextId = 1;
   function safeGetBest() {
     try {
-      return Number(window.localStorage?.getItem('polygon-pop-best') || '0');
+      return Number(window.localStorage?.getItem('polygon-smash-best') || '0');
     } catch {
       return 0;
     }
@@ -81,14 +83,14 @@
 
   function safeSetBest(value) {
     try {
-      window.localStorage?.setItem('polygon-pop-best', String(value));
+      window.localStorage?.setItem('polygon-smash-best', String(value));
     } catch {}
   }
 
   let score = 0;
   let best = safeGetBest();
   let nextTier = 1; // what fires next (shown on barrel)
-  let queueTier = 1; // what fires after that (shown in NEXT panel)
+  let queueTiers = [1, 1]; // two-piece preview queue
   let launchCooldown = 0;
   let lastTime = 0;
   let accumulator = 0;
@@ -236,13 +238,39 @@
     aimAngle = -Math.PI / 2;
     pauseBtn.textContent = 'Pause';
     nextTier = randomSpawnTier();
-    queueTier = randomSpawnTier();
+    queueTiers = [randomSpawnTier(), randomSpawnTier()];
     updateHud();
+  }
+
+  function polygonClipPath(sides) {
+    if (sides <= 2) return 'none';
+    const points = [];
+    for (let i = 0; i < sides; i++) {
+      const a = -Math.PI / 2 + i * ((Math.PI * 2) / sides);
+      const x = 50 + Math.cos(a) * 50;
+      const y = 50 + Math.sin(a) * 50;
+      points.push(`${x.toFixed(2)}% ${y.toFixed(2)}%`);
+    }
+    return `polygon(${points.join(',')})`;
+  }
+
+  function renderQueueSlot(slotEl, tier) {
+    if (!slotEl) return;
+    const data = tierData(tier);
+    const shape = document.createElement('div');
+    shape.className = 'queue-shape';
+    shape.style.background = data.color;
+    shape.style.clipPath = polygonClipPath(data.sides);
+    shape.textContent = String(tier);
+    shape.setAttribute('aria-label', `${data.name}, tier ${tier}`);
+    slotEl.replaceChildren(shape);
   }
 
   function updateHud() {
     scoreEl.textContent = Math.floor(score).toLocaleString();
     bestEl.textContent = Math.floor(best).toLocaleString();
+    renderQueueSlot(queueSlot1El, queueTiers[0]);
+    renderQueueSlot(queueSlot2El, queueTiers[1]);
   }
 
   function regularPolygonCtx(c, cx, cy, r, sides, rotation) {
@@ -319,8 +347,8 @@
     addDirectionalBurst(x, y, 7, tierData(tier).color, -dx, -dy, 0.5, 80, 170);
     launchCooldown = LAUNCH_COOLDOWN;
     playLaunchSound();
-    nextTier = queueTier;
-    queueTier = randomSpawnTier();
+    nextTier = queueTiers.shift();
+    queueTiers.push(randomSpawnTier());
     updateHud();
   }
 
@@ -830,15 +858,23 @@
     const len = 100;
     const ax = LAUNCHER_X + Math.cos(aimAngle) * len;
     const ay = LAUNCHER_Y + Math.sin(aimAngle) * len;
+    const glow = ctx.createLinearGradient(LAUNCHER_X, LAUNCHER_Y, ax, ay);
+    glow.addColorStop(0, 'rgba(133,184,255,0.2)');
+    glow.addColorStop(1, 'rgba(133,184,255,0.95)');
 
-    ctx.setLineDash([10, 10]);
-    ctx.strokeStyle = 'rgba(133,184,255,0.85)';
+    ctx.setLineDash([10, 8]);
+    ctx.strokeStyle = glow;
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(LAUNCHER_X, LAUNCHER_Y);
     ctx.lineTo(ax, ay);
     ctx.stroke();
     ctx.setLineDash([]);
+
+    ctx.beginPath();
+    ctx.arc(ax, ay, 4, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(180,220,255,0.9)';
+    ctx.fill();
   }
 
   function drawLauncher() {

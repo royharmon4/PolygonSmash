@@ -50,10 +50,12 @@ body {
   justify-content: space-between;
   align-items: center;
   padding: 6px 10px 5px;
+  gap: 10px;
 }
 
 .hud-group { display: flex; flex-direction: column; align-items: flex-start; }
 .hud-group.center { align-items: center; }
+.queue-group { align-items: center; min-width: 118px; }
 
 .hud-label {
   color: rgba(255,255,255,0.38);
@@ -73,6 +75,32 @@ body {
 }
 
 .hud-value.gold { color: #ffd166; }
+
+.queue {
+  display: flex;
+  gap: 8px;
+}
+
+.queue-slot {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(7, 14, 28, 0.65);
+  display: grid;
+  place-items: center;
+}
+
+.queue-shape {
+  width: 24px;
+  height: 24px;
+  border: 2px solid rgba(255,255,255,0.88);
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 800;
+  color: rgba(255,255,255,0.8);
+}
 canvas {
   width: 480px;
   max-width: 100%;
