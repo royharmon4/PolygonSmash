@@ -19,13 +19,14 @@
   const DANGER_Y = HEIGHT - 180;
   const DANGER_GRACE_SECONDS = 2;
   const GRAVITY = -640;
-  const AIR_DRAG = 0.999; // less drag — pieces stay bouncy/chaotic longer
-  const WALL_BOUNCE = 0.22; // more wall bounce — messier stacking
-  const PAIR_BOUNCE = 0.15; // pieces jostle each other more
-  const MERGE_RELATIVE_SPEED = 320;
-  const POLARITY_FORCE_BASE = 180;
-  const POLARITY_FORCE_MAX = 60;
-  const POLARITY_FORCE_RANGE_MULT = 2.2;
+  const AIR_DRAG = 0.992; // stronger drag for more deliberate placements
+  const WALL_BOUNCE = 0.12; // less wall correction after misses
+  const PAIR_BOUNCE = 0.08; // less chaotic pinball collisions
+  const MERGE_RELATIVE_SPEED = 95;
+  const MERGE_MAX_SPEED = 120;
+  const MERGE_CONTACT_TIME = 0.12;
+  const MERGE_MAX_OVERLAP_RATIO = 0.18;
+  const MERGE_MAX_STRESS = 0.7;
   const LAUNCH_COOLDOWN = 0.42; // slower fire rate — can't spam out of trouble
   const FIXED_STEP = 1 / 60;
   const BASE_RADIUS = 24; // slightly bigger pieces — board fills faster
@@ -88,8 +89,6 @@
   let best = safeGetBest();
   let nextTier = 1; // what fires next (shown on barrel)
   let queueTier = 1; // what fires after that (shown in NEXT panel)
-  let nextPolarity = 1;
-  let queuePolarity = 1;
   let launchCooldown = 0;
   let lastTime = 0;
   let accumulator = 0;
@@ -238,8 +237,6 @@
     pauseBtn.textContent = 'Pause';
     nextTier = randomSpawnTier();
     queueTier = randomSpawnTier();
-    nextPolarity = randomPolarity();
-    queuePolarity = randomPolarity();
     updateHud();
   }
 
@@ -276,23 +273,6 @@
     }
   }
 
-  function randomPolarity() {
-    return Math.random() < 0.5 ? 1 : -1;
-  }
-
-  function polaritySymbol(polarity) {
-    return polarity > 0 ? '+' : '−';
-  }
-
-  function polarityTint(polarity, alpha = 0.65) {
-    return polarity > 0 ? `rgba(110, 190, 255, ${alpha})` : `rgba(255, 167, 84, ${alpha})`;
-  }
-
-  function mergedPolarity(aPolarity, bPolarity) {
-    if (aPolarity > 0 && bPolarity > 0) return -1;
-    return 1;
-  }
-
   function tierData(tier) {
     return TIERS[tier - 1];
   }
@@ -300,7 +280,7 @@
     return BASE_RADIUS * tierData(tier).radius;
   }
 
-  function createPiece(x, y, tier, vx = 0, vy = 0, polarity = 1) {
+  function createPiece(x, y, tier, vx = 0, vy = 0) {
     return {
       id: nextId++,
       x,
@@ -310,14 +290,17 @@
       tier,
       r: radiusForTier(tier),
       age: 0,
-      cooldown: 0.14,
+      cooldown: 0.2,
       merged: false,
       mergeFlash: 0,
       mergeFlashMax: 0.15,
-      polarity,
       settleTime: 0,
       settled: false,
       touchingSupport: false,
+      calmTime: 0,
+      impactStress: 0,
+      contactId: null,
+      contactTime: 0,
     };
   }
 
@@ -331,15 +314,13 @@
     // spawn just inside the bottom edge
     const x = clamp(LAUNCHER_X + dx * 28, WELL.left + r, WELL.right - r);
     const y = clamp(LAUNCHER_Y + dy * 10, FIXED_CEILING_Y + r, WELL.bottom - r);
-    pieces.push(createPiece(x, y, tier, dx * 760, dy * 760, nextPolarity));
+    pieces.push(createPiece(x, y, tier, dx * 700, dy * 700));
     bestTierThisRun = Math.max(bestTierThisRun, tier);
     addDirectionalBurst(x, y, 7, tierData(tier).color, -dx, -dy, 0.5, 80, 170);
     launchCooldown = LAUNCH_COOLDOWN;
     playLaunchSound();
     nextTier = queueTier;
-    nextPolarity = queuePolarity;
     queueTier = randomSpawnTier();
-    queuePolarity = randomPolarity();
     updateHud();
   }
 
@@ -471,7 +452,6 @@
     while (queuedMerges.length > 0) {
       const mergesThisPass = queuedMerges;
       queuedMerges = [];
-      const spawnedPieces = [];
 
       for (const [a, b] of mergesThisPass) {
         if (
@@ -505,12 +485,10 @@
           newTier,
           (a.vx + b.vx) * 0.18,
           (a.vy + b.vy) * 0.18,
-          mergedPolarity(a.polarity, b.polarity),
         );
-        piece.cooldown = 0.16;
+        piece.cooldown = 0.22;
         piece.mergeFlash = piece.mergeFlashMax;
         pieces.push(piece);
-        spawnedPieces.push(piece);
         score += tierData(newTier).score;
         addPulse(mx, my, piece.r + 10, tierData(newTier).color, 0.25);
         if (mergeCount === 0) {
@@ -521,28 +499,6 @@
         mergeCount++;
       }
 
-      // Chain merges: newly spawned pieces can immediately merge again when touching same-tier pieces.
-      for (const piece of spawnedPieces) {
-        if (!pieces.includes(piece) || chainConsumed.has(piece.id) || piece.merged) continue;
-
-        for (const candidate of pieces) {
-          if (
-            candidate.id === piece.id ||
-            candidate.tier !== piece.tier ||
-            candidate.merged ||
-            chainConsumed.has(candidate.id)
-          ) {
-            continue;
-          }
-
-          const dx = candidate.x - piece.x;
-          const dy = candidate.y - piece.y;
-          const minDist = candidate.r + piece.r;
-          if (dx * dx + dy * dy > minDist * minDist) continue;
-          queueMerge(piece, candidate);
-          break;
-        }
-      }
     }
   }
 
@@ -644,36 +600,11 @@
       piece.touchingSupport = false;
     }
 
-    for (let i = 0; i < pieces.length; i++) {
-      for (let j = i + 1; j < pieces.length; j++) {
-        const a = pieces[i];
-        const b = pieces[j];
-        const dx = b.x - a.x;
-        const dy = b.y - a.y;
-        const distSq = dx * dx + dy * dy;
-        if (distSq <= 0.0001) continue;
-        const dist = Math.sqrt(distSq);
-        const range = (a.r + b.r) * POLARITY_FORCE_RANGE_MULT;
-        if (dist > range) continue;
-        const polarityForceBase = POLARITY_FORCE_BASE;
-        const polarityForceMax = POLARITY_FORCE_MAX;
-        const forceMag = Math.min(polarityForceMax, polarityForceBase / distSq);
-        const nx = dx / dist;
-        const ny = dy / dist;
-        const dir = a.polarity === b.polarity ? -1 : 1;
-        const dvx = nx * forceMag * dt * dir;
-        const dvy = ny * forceMag * dt * dir;
-        a.vx -= dvx;
-        a.vy -= dvy;
-        b.vx += dvx;
-        b.vy += dvy;
-      }
-    }
-
     for (const piece of pieces) {
       piece.age += dt;
       piece.cooldown = Math.max(0, piece.cooldown - dt);
       piece.mergeFlash = Math.max(0, piece.mergeFlash - dt);
+      piece.impactStress = Math.max(0, piece.impactStress - dt * 1.35);
       piece.vy += GRAVITY * dt;
       piece.vx *= AIR_DRAG;
       piece.vy *= AIR_DRAG;
@@ -717,6 +648,7 @@
           const nx = dx / dist;
           const ny = dy / dist;
           const overlap = (minDist - dist) * 0.5;
+          const overlapRatio = (minDist - dist) / minDist;
           a.x -= nx * overlap;
           a.y -= ny * overlap;
           b.x += nx * overlap;
@@ -725,6 +657,9 @@
           const rvx = b.vx - a.vx;
           const rvy = b.vy - a.vy;
           const speedAlongNormal = rvx * nx + rvy * ny;
+          const impact = Math.abs(speedAlongNormal) + overlapRatio * 180;
+          a.impactStress = Math.min(1.5, a.impactStress + impact * 0.0035);
+          b.impactStress = Math.min(1.5, b.impactStress + impact * 0.0035);
           if (speedAlongNormal < 0) {
             const impulse = -(1 + PAIR_BOUNCE) * speedAlongNormal * 0.5;
             a.vx -= impulse * nx;
@@ -732,15 +667,36 @@
             b.vx += impulse * nx;
             b.vy += impulse * ny;
           }
-
-          // FIX 3: merge when same tier, cooled down, and relative speed below (raised) threshold
+          if (a.contactId === b.id) a.contactTime += dt;
+          else {
+            a.contactId = b.id;
+            a.contactTime = dt;
+          }
+          if (b.contactId === a.id) b.contactTime += dt;
+          else {
+            b.contactId = a.id;
+            b.contactTime = dt;
+          }
+          const aSpeed = Math.hypot(a.vx, a.vy);
+          const bSpeed = Math.hypot(b.vx, b.vy);
           if (
             a.tier === b.tier &&
             !a.merged &&
             !b.merged &&
             a.cooldown <= 0 &&
             b.cooldown <= 0 &&
-            Math.abs(speedAlongNormal) <= MERGE_RELATIVE_SPEED
+            a.contactId === b.id &&
+            b.contactId === a.id &&
+            a.contactTime >= MERGE_CONTACT_TIME &&
+            b.contactTime >= MERGE_CONTACT_TIME &&
+            a.calmTime >= MERGE_CONTACT_TIME &&
+            b.calmTime >= MERGE_CONTACT_TIME &&
+            Math.abs(speedAlongNormal) <= MERGE_RELATIVE_SPEED &&
+            aSpeed <= MERGE_MAX_SPEED &&
+            bSpeed <= MERGE_MAX_SPEED &&
+            overlapRatio <= MERGE_MAX_OVERLAP_RATIO &&
+            a.impactStress <= MERGE_MAX_STRESS &&
+            b.impactStress <= MERGE_MAX_STRESS
           ) {
             queueMerge(a, b);
           }
@@ -752,6 +708,14 @@
 
     for (const piece of pieces) {
       const speed = Math.hypot(piece.vx, piece.vy);
+      if (piece.contactTime > 0) piece.contactTime = Math.max(0, piece.contactTime - dt * 3);
+      if (piece.contactTime <= 0) piece.contactId = null;
+      const calmCap = Math.max(0, 1 - piece.impactStress * 0.9);
+      if (speed < 55 && piece.touchingSupport) {
+        piece.calmTime = Math.min(1, piece.calmTime + dt * calmCap);
+      } else {
+        piece.calmTime = Math.max(0, piece.calmTime - dt * 2.4);
+      }
       const canSettle = piece.age > 0.2 && piece.touchingSupport && speed < 65;
 
       if (canSettle) {
@@ -835,7 +799,7 @@
     ctx.fill();
     ctx.lineWidth = 3;
     ctx.strokeStyle = 'rgba(255,255,255,0.85)';
-    ctx.shadowColor = polarityTint(piece.polarity, 0.8);
+    ctx.shadowColor = 'rgba(122, 195, 255, 0.6)';
     ctx.shadowBlur = 9;
     ctx.stroke();
     ctx.shadowBlur = 0;
@@ -846,7 +810,7 @@
     ctx.font = `700 ${Math.max(12, piece.r * 0.6)}px Inter, sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(polaritySymbol(piece.polarity), 0, 1);
+    ctx.fillText(String(piece.tier), 0, 1);
     ctx.restore();
   }
 
@@ -907,7 +871,7 @@
     ctx.font = `700 ${Math.max(10, pieceR * 0.9)}px Inter, sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(polaritySymbol(nextPolarity), tipX, tipY + 1);
+    ctx.fillText(String(nextTier), tipX, tipY + 1);
 
     ctx.restore();
 
