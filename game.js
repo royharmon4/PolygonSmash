@@ -315,6 +315,9 @@
       mergeFlash: 0,
       mergeFlashMax: 0.15,
       polarity,
+      settleTime: 0,
+      settled: false,
+      touchingSupport: false,
     };
   }
 
@@ -637,6 +640,10 @@
   function stepPhysics(dt) {
     launchCooldown = Math.max(0, launchCooldown - dt);
 
+    for (const piece of pieces) {
+      piece.touchingSupport = false;
+    }
+
     for (let i = 0; i < pieces.length; i++) {
       for (let j = i + 1; j < pieces.length; j++) {
         const a = pieces[i];
@@ -684,6 +691,7 @@
       }
       if (piece.y - piece.r < FIXED_CEILING_Y) {
         piece.y = FIXED_CEILING_Y + piece.r;
+        piece.touchingSupport = true;
         if (piece.vy < 0) piece.vy *= -WALL_BOUNCE;
       }
       if (piece.y + piece.r > WELL.bottom) {
@@ -703,6 +711,8 @@
           const dist = Math.hypot(dx, dy) || 0.0001;
           const minDist = a.r + b.r;
           if (dist >= minDist) continue;
+          a.touchingSupport = true;
+          b.touchingSupport = true;
 
           const nx = dx / dist;
           const ny = dy / dist;
@@ -740,12 +750,26 @@
 
     processMerges();
 
+    for (const piece of pieces) {
+      const speed = Math.hypot(piece.vx, piece.vy);
+      const canSettle = piece.age > 0.2 && piece.touchingSupport && speed < 65;
+
+      if (canSettle) {
+        piece.settleTime = Math.min(1, piece.settleTime + dt);
+      } else {
+        piece.settleTime = Math.max(0, piece.settleTime - dt * 2);
+      }
+
+      piece.settled = piece.settleTime >= 0.18;
+    }
+
     let maxPieceBottom = -Infinity;
     for (const piece of pieces) {
+      if (!piece.settled) continue;
       maxPieceBottom = Math.max(maxPieceBottom, piece.y + piece.r);
     }
 
-    dangerActive = maxPieceBottom > DANGER_Y;
+    dangerActive = maxPieceBottom !== -Infinity && maxPieceBottom > DANGER_Y;
     if (dangerActive) {
       dangerTimer += dt;
       currentSafeStreak = 0;
