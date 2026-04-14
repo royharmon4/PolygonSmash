@@ -855,26 +855,39 @@
   }
 
   function drawAimLine() {
-    const len = 100;
+    const len = 130;
     const ax = LAUNCHER_X + Math.cos(aimAngle) * len;
     const ay = LAUNCHER_Y + Math.sin(aimAngle) * len;
     const glow = ctx.createLinearGradient(LAUNCHER_X, LAUNCHER_Y, ax, ay);
-    glow.addColorStop(0, 'rgba(133,184,255,0.2)');
+    glow.addColorStop(0, 'rgba(133,184,255,0.24)');
     glow.addColorStop(1, 'rgba(133,184,255,0.95)');
 
-    ctx.setLineDash([10, 8]);
+    ctx.setLineDash([14, 8]);
     ctx.strokeStyle = glow;
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 2.5;
     ctx.beginPath();
     ctx.moveTo(LAUNCHER_X, LAUNCHER_Y);
     ctx.lineTo(ax, ay);
     ctx.stroke();
     ctx.setLineDash([]);
 
+    const closeLen = 66;
+    const closeX = LAUNCHER_X + Math.cos(aimAngle) * closeLen;
+    const closeY = LAUNCHER_Y + Math.sin(aimAngle) * closeLen;
+    ctx.strokeStyle = 'rgba(220,238,255,0.45)';
+    ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.arc(ax, ay, 4, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(180,220,255,0.9)';
+    ctx.moveTo(LAUNCHER_X, LAUNCHER_Y);
+    ctx.lineTo(closeX, closeY);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(ax, ay, 5, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(180,220,255,0.94)';
     ctx.fill();
+    ctx.strokeStyle = 'rgba(230,245,255,0.92)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
   }
 
   function drawLauncher() {
