@@ -329,6 +329,7 @@
       impactStress: 0,
       contactId: null,
       contactTime: 0,
+      contactSeen: false,
     };
   }
 
@@ -626,6 +627,7 @@
 
     for (const piece of pieces) {
       piece.touchingSupport = false;
+      piece.contactSeen = false;
     }
 
     for (const piece of pieces) {
@@ -700,11 +702,13 @@
             a.contactId = b.id;
             a.contactTime = dt;
           }
+          a.contactSeen = true;
           if (b.contactId === a.id) b.contactTime += dt;
           else {
             b.contactId = a.id;
             b.contactTime = dt;
           }
+          b.contactSeen = true;
           const aSpeed = Math.hypot(a.vx, a.vy);
           const bSpeed = Math.hypot(b.vx, b.vy);
           if (
@@ -736,8 +740,10 @@
 
     for (const piece of pieces) {
       const speed = Math.hypot(piece.vx, piece.vy);
-      if (piece.contactTime > 0) piece.contactTime = Math.max(0, piece.contactTime - dt * 3);
-      if (piece.contactTime <= 0) piece.contactId = null;
+      if (!piece.contactSeen && piece.contactTime > 0) {
+        piece.contactTime = Math.max(0, piece.contactTime - dt * 3);
+        if (piece.contactTime <= 0) piece.contactId = null;
+      }
       const calmCap = Math.max(0, 1 - piece.impactStress * 0.9);
       if (speed < 55 && piece.touchingSupport) {
         piece.calmTime = Math.min(1, piece.calmTime + dt * calmCap);
