@@ -70,8 +70,22 @@
   let effects = [];
   let queuedMerges = [];
   let nextId = 1;
+  function safeGetBest() {
+    try {
+      return Number(window.localStorage?.getItem('polygon-pop-best') || '0');
+    } catch {
+      return 0;
+    }
+  }
+
+  function safeSetBest(value) {
+    try {
+      window.localStorage?.setItem('polygon-pop-best', String(value));
+    } catch {}
+  }
+
   let score = 0;
-  let best = Number(localStorage.getItem('polygon-pop-best') || '0');
+  let best = safeGetBest();
   let nextTier = 1; // what fires next (shown on barrel)
   let queueTier = 1; // what fires after that (shown in NEXT panel)
   let nextPolarity = 1;
@@ -747,7 +761,7 @@
 
     if (!gameOver) {
       best = Math.max(best, Math.floor(score));
-      localStorage.setItem('polygon-pop-best', String(best));
+      safeSetBest(best);
     }
   }
 
@@ -756,7 +770,7 @@
     gamePhase = 'results';
     playGameOverSound();
     best = Math.max(best, Math.floor(score));
-    localStorage.setItem('polygon-pop-best', String(best));
+    safeSetBest(best);
     updateHud();
     addBurst(WIDTH / 2, DANGER_Y, 28, '#ff7777');
     finalRunStats = {
@@ -1128,7 +1142,7 @@
       }
       if (Math.floor(score) > best) {
         best = Math.floor(score);
-        localStorage.setItem('polygon-pop-best', String(best));
+        safeSetBest(best);
         updateHud();
       }
     } else {
