@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-  <title>Polygon Smash</title>
+  <title>Polygon Smash Arcade</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -26,7 +26,7 @@
           <div class="hud-value gold" id="best">0</div>
         </div>
       </div>
-      <canvas id="game" width="480" height="760" aria-label="Polygon Smash game canvas"></canvas>
+      <canvas id="game" width="480" height="760" aria-label="Polygon Smash Arcade game canvas"></canvas>
 
       <div class="controls">
         <button id="restartBtn">Restart</button>
@@ -37,18 +37,18 @@
     <aside class="card panel legend">
       <div>
         <h2>How to play</h2>
-        <p>Aim in the arena, then <strong>click/tap to fire</strong>. On mobile, drag to aim and <strong>lift</strong> to shoot.</p>
+        <p>Aim, then <strong>click/tap to fire</strong>. On mobile, drag to aim and <strong>lift</strong> to shoot.</p>
         <ul>
-          <li>Inverted gravity pulls pieces <strong>upward</strong>, so stacks hang from the fixed ceiling.</li>
-          <li>The tier ladder is fixed: matching equal tiers makes the next tier.</li>
-          <li>The lower danger line is fixed. If any settled piece stays below it for ~2 seconds, the run ends.</li>
-          <li>Dodecagon capstones explode when merged and clear nearby pieces.</li>
+          <li>Gravity is inverted: pieces pull <strong>upward</strong> and settle against the fixed ceiling.</li>
+          <li>The ladder is fixed: match two equal tiers to create the next tier.</li>
+          <li>The danger line is fixed near the bottom. If a settled piece stays below it for about 2 seconds, you lose.</li>
+          <li>Dodecagon capstones explode on merge and clear nearby pieces.</li>
         </ul>
       </div>
 
       <div>
         <h2>Arcade notes</h2>
-        <p>Use the Next 2 queue to plan safe placements before the danger timer starts.</p>
+        <p>Plan with the Next 2 queue to keep a clean merge path before the danger timer starts.</p>
         <p class="hint">Fast planning beats panic shots.</p>
       </div>
     </aside>
