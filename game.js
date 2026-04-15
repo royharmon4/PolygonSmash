@@ -23,12 +23,13 @@
   const GRAVITY = -640;
   const AIR_DRAG = 0.992; // stronger drag for more deliberate placements
   const WALL_BOUNCE = 0.12; // less wall correction after misses
-  const PAIR_BOUNCE = 0.08; // less chaotic pinball collisions
-  const MERGE_RELATIVE_SPEED = 95;
-  const MERGE_MAX_SPEED = 120;
-  const MERGE_CONTACT_TIME = 0.12;
-  const MERGE_MAX_OVERLAP_RATIO = 0.18;
-  const MERGE_MAX_STRESS = 0.7;
+  const PAIR_BOUNCE = 0.06; // keep pile motion, but reduce ping-pong bounces
+  const MATCH_BOUNCE = 0.02; // matching tiers absorb more impact to encourage merges
+  const MERGE_CONTACT_SLOP = 6;
+  const MERGE_MIN_OVERLAP_RATIO = 0.02;
+  const MERGE_STABLE_CONTACT_TIME = 0.06;
+  const MERGE_MAX_SEPARATION_SPEED = 125;
+  const MERGE_MAX_RELATIVE_SPEED = 240;
   const LAUNCH_COOLDOWN = 0.42; // slower fire rate — can't spam out of trouble
   const FIXED_STEP = 1 / 60;
   const BASE_RADIUS = 24; // slightly bigger pieces — board fills faster
@@ -72,6 +73,7 @@
   let pieces = [];
   let effects = [];
   let queuedMerges = [];
+  let mergeContactTimes = new Map();
   let nextId = 1;
   function safeGetBest() {
     try {
@@ -221,6 +223,7 @@
     pieces = [];
     effects = [];
     queuedMerges = [];
+    mergeContactTimes = new Map();
     nextId = 1;
     score = 0;
     launchCooldown = 0;
@@ -325,11 +328,6 @@
       settleTime: 0,
       settled: false,
       touchingSupport: false,
-      calmTime: 0,
-      impactStress: 0,
-      contactId: null,
-      contactTime: 0,
-      contactSeen: false,
     };
   }
 
@@ -627,14 +625,12 @@
 
     for (const piece of pieces) {
       piece.touchingSupport = false;
-      piece.contactSeen = false;
     }
 
     for (const piece of pieces) {
       piece.age += dt;
       piece.cooldown = Math.max(0, piece.cooldown - dt);
       piece.mergeFlash = Math.max(0, piece.mergeFlash - dt);
-      piece.impactStress = Math.max(0, piece.impactStress - dt * 1.35);
       piece.vy += GRAVITY * dt;
       piece.vx *= AIR_DRAG;
       piece.vy *= AIR_DRAG;
@@ -662,6 +658,7 @@
     }
 
     // Piece-to-piece collisions & merge detection
+    const nextMergeContactTimes = new Map();
     for (let pass = 0; pass < 2; pass++) {
       for (let i = 0; i < pieces.length; i++) {
         for (let j = i + 1; j < pieces.length; j++) {
@@ -671,84 +668,71 @@
           const dy = b.y - a.y;
           const dist = Math.hypot(dx, dy) || 0.0001;
           const minDist = a.r + b.r;
-          if (dist >= minDist) continue;
-          a.touchingSupport = true;
-          b.touchingSupport = true;
+          const mergeZoneDist = minDist + MERGE_CONTACT_SLOP;
+          if (dist > mergeZoneDist) continue;
 
           const nx = dx / dist;
           const ny = dy / dist;
-          const overlap = (minDist - dist) * 0.5;
-          const overlapRatio = (minDist - dist) / minDist;
-          a.x -= nx * overlap;
-          a.y -= ny * overlap;
-          b.x += nx * overlap;
-          b.y += ny * overlap;
-
+          const isOverlapping = dist < minDist;
+          const overlapRatio = isOverlapping ? (minDist - dist) / minDist : 0;
           const rvx = b.vx - a.vx;
           const rvy = b.vy - a.vy;
           const speedAlongNormal = rvx * nx + rvy * ny;
-          const impact = Math.abs(speedAlongNormal) + overlapRatio * 180;
-          a.impactStress = Math.min(1.5, a.impactStress + impact * 0.0035);
-          b.impactStress = Math.min(1.5, b.impactStress + impact * 0.0035);
-          if (speedAlongNormal < 0) {
-            const impulse = -(1 + PAIR_BOUNCE) * speedAlongNormal * 0.5;
-            a.vx -= impulse * nx;
-            a.vy -= impulse * ny;
-            b.vx += impulse * nx;
-            b.vy += impulse * ny;
+          const relativeSpeed = Math.hypot(rvx, rvy);
+          const separatingSpeed = Math.max(0, speedAlongNormal);
+          const pairKey = a.id < b.id ? `${a.id}:${b.id}` : `${b.id}:${a.id}`;
+
+          if (isOverlapping) {
+            a.touchingSupport = true;
+            b.touchingSupport = true;
+            const overlap = (minDist - dist) * 0.5;
+            a.x -= nx * overlap;
+            a.y -= ny * overlap;
+            b.x += nx * overlap;
+            b.y += ny * overlap;
+
+            if (speedAlongNormal < 0) {
+              const restitution = a.tier === b.tier ? MATCH_BOUNCE : PAIR_BOUNCE;
+              const impulse = -(1 + restitution) * speedAlongNormal * 0.5;
+              a.vx -= impulse * nx;
+              a.vy -= impulse * ny;
+              b.vx += impulse * nx;
+              b.vy += impulse * ny;
+            }
           }
-          if (a.contactId === b.id) a.contactTime += dt;
-          else {
-            a.contactId = b.id;
-            a.contactTime = dt;
+
+          const priorContact = mergeContactTimes.get(pairKey) || 0;
+          const stableThisFrame = separatingSpeed <= MERGE_MAX_SEPARATION_SPEED;
+          const contactTime = stableThisFrame ? priorContact + dt : 0;
+          if (contactTime > 0) {
+            nextMergeContactTimes.set(pairKey, Math.min(0.5, contactTime));
           }
-          a.contactSeen = true;
-          if (b.contactId === a.id) b.contactTime += dt;
-          else {
-            b.contactId = a.id;
-            b.contactTime = dt;
-          }
-          b.contactSeen = true;
-          const aSpeed = Math.hypot(a.vx, a.vy);
-          const bSpeed = Math.hypot(b.vx, b.vy);
+
           if (
             a.tier === b.tier &&
             !a.merged &&
             !b.merged &&
             a.cooldown <= 0 &&
             b.cooldown <= 0 &&
-            a.contactId === b.id &&
-            b.contactId === a.id &&
-            a.contactTime >= MERGE_CONTACT_TIME &&
-            b.contactTime >= MERGE_CONTACT_TIME &&
-            a.calmTime >= MERGE_CONTACT_TIME &&
-            b.calmTime >= MERGE_CONTACT_TIME &&
-            Math.abs(speedAlongNormal) <= MERGE_RELATIVE_SPEED &&
-            aSpeed <= MERGE_MAX_SPEED &&
-            bSpeed <= MERGE_MAX_SPEED &&
-            overlapRatio <= MERGE_MAX_OVERLAP_RATIO &&
-            a.impactStress <= MERGE_MAX_STRESS &&
-            b.impactStress <= MERGE_MAX_STRESS
+            stableThisFrame &&
+            relativeSpeed <= MERGE_MAX_RELATIVE_SPEED &&
+            (isOverlapping || contactTime >= MERGE_STABLE_CONTACT_TIME) &&
+            (overlapRatio >= MERGE_MIN_OVERLAP_RATIO || contactTime >= MERGE_STABLE_CONTACT_TIME)
           ) {
             queueMerge(a, b);
           }
         }
       }
     }
+    mergeContactTimes = nextMergeContactTimes;
 
     processMerges();
 
     for (const piece of pieces) {
       const speed = Math.hypot(piece.vx, piece.vy);
-      if (!piece.contactSeen && piece.contactTime > 0) {
-        piece.contactTime = Math.max(0, piece.contactTime - dt * 3);
-        if (piece.contactTime <= 0) piece.contactId = null;
-      }
-      const calmCap = Math.max(0, 1 - piece.impactStress * 0.9);
       if (speed < 55 && piece.touchingSupport) {
-        piece.calmTime = Math.min(1, piece.calmTime + dt * calmCap);
-      } else {
-        piece.calmTime = Math.max(0, piece.calmTime - dt * 2.4);
+        piece.vx *= 0.992;
+        piece.vy *= 0.992;
       }
       const canSettle = piece.age > 0.2 && piece.touchingSupport && speed < 65;
 
