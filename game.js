@@ -110,6 +110,7 @@
   let audioCtx = null;
   let audioMaster = null;
   let noiseBuffer = null;
+  let bestTierBanner = null;
 
   function ensureAudioContext() {
     if (!window.AudioContext && !window.webkitAudioContext) return null;
@@ -219,6 +220,31 @@
     }
   }
 
+  function settleFrequencyForTier(tier) {
+    const clamped = clamp(tier, 1, MAX_TIER);
+    const t = (clamped - 1) / (MAX_TIER - 1);
+    return 120 - t * 40;
+  }
+
+  function playSettleThud(tier) {
+    const ac = ensureAudioContext();
+    if (!ac || !audioMaster) return;
+    const now = ac.currentTime;
+    const osc = ac.createOscillator();
+    const gain = ac.createGain();
+    osc.type = 'sine';
+    const baseFreq = settleFrequencyForTier(tier);
+    osc.frequency.setValueAtTime(baseFreq, now);
+    osc.frequency.exponentialRampToValueAtTime(baseFreq * 0.85, now + 0.08);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.045, now + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
+    osc.connect(gain);
+    gain.connect(audioMaster);
+    osc.start(now);
+    osc.stop(now + 0.085);
+  }
+
   function resetGame() {
     pieces = [];
     effects = [];
@@ -237,6 +263,7 @@
     dangerTimer = 0;
     dangerActive = false;
     finalRunStats = null;
+    bestTierBanner = null;
     paused = false;
     aimAngle = -Math.PI / 2;
     pauseBtn.textContent = 'Pause';
@@ -342,7 +369,7 @@
     const x = clamp(LAUNCHER_X + dx * 28, WELL.left + r, WELL.right - r);
     const y = clamp(LAUNCHER_Y + dy * 10, FIXED_CEILING_Y + r, WELL.bottom - r);
     pieces.push(createPiece(x, y, tier, dx * 700, dy * 700));
-    bestTierThisRun = Math.max(bestTierThisRun, tier);
+    setBestTierThisRun(tier);
     addDirectionalBurst(x, y, 7, tierData(tier).color, -dx, -dy, 0.5, 80, 170);
     launchCooldown = LAUNCH_COOLDOWN;
     playLaunchSound();
@@ -473,10 +500,50 @@
     queuedMerges.push([a, b]);
   }
 
+  function setBestTierThisRun(tier) {
+    if (tier > bestTierThisRun) {
+      bestTierThisRun = tier;
+      const tierInfo = tierData(tier);
+      bestTierBanner = {
+        text: `NEW BEST TIER — ${tierInfo.name}!`,
+        life: 1.2,
+        maxLife: 1.2,
+      };
+    }
+  }
+
+  function applyMergeScreenshake(tier) {
+    let minFrames = 0;
+    let spread = 0;
+    if (tier >= 8) {
+      minFrames = 4;
+      spread = 2;
+    } else if (tier >= 5) {
+      minFrames = 2;
+      spread = 1;
+    }
+    if (minFrames === 0) return;
+    shakeFramesRemaining = Math.max(shakeFramesRemaining, minFrames + Math.floor(Math.random() * (spread + 1)));
+  }
+
+  function addChainText(x, y, chainDepth) {
+    effects.push({
+      type: 'chainText',
+      x,
+      y,
+      rise: 26,
+      text: `+CHAIN x${chainDepth}`,
+      life: 0.6,
+      maxLife: 0.6,
+    });
+  }
+
   function processMerges() {
     const chainConsumed = new Set();
     let mergeCount = 0;
+    let chainDepth = 0;
     while (queuedMerges.length > 0) {
+      chainDepth++;
       const mergesThisPass = queuedMerges;
       queuedMerges = [];
 
@@ -505,7 +572,7 @@
         }
 
         const newTier = tier + 1;
-        bestTierThisRun = Math.max(bestTierThisRun, newTier);
+        setBestTierThisRun(newTier);
         const piece = createPiece(
           mx,
           my,
@@ -515,9 +582,11 @@
         );
         piece.cooldown = 0.22;
         piece.mergeFlash = piece.mergeFlashMax;
+        if (chainDepth > 1) addChainText(mx, my - piece.r - 16, chainDepth);
         pieces.push(piece);
         score += tierData(newTier).score;
         addPulse(mx, my, piece.r + 10, tierData(newTier).color, 0.25);
+        applyMergeScreenshake(newTier);
         if (mergeCount === 0) {
           playMergeSound(newTier);
         } else {
@@ -553,7 +622,7 @@
     score += capstoneMergeScore + cleared;
     addPulse(x, y, EXPLOSION_RADIUS, '#ffd3a8', 0.55);
     addBurst(x, y, 24, '#ffd3a8');
-    shakeFramesRemaining = Math.max(shakeFramesRemaining, 3 + Math.floor(Math.random() * 2));
+    shakeFramesRemaining = Math.max(shakeFramesRemaining, 8 + Math.floor(Math.random() * 3));
   }
 
   function removePiece(piece) {
@@ -616,7 +685,13 @@
         fx.vy *= 0.98;
         fx.x += fx.vx * dt;
         fx.y += fx.vy * dt;
+      } else if (fx.type === 'chainText') {
+        fx.y -= (fx.rise / fx.maxLife) * dt;
       }
+    }
+    if (bestTierBanner) {
+      bestTierBanner.life -= dt;
+      if (bestTierBanner.life <= 0) bestTierBanner = null;
     }
   }
 
@@ -742,7 +817,11 @@
         piece.settleTime = Math.max(0, piece.settleTime - dt * 2);
       }
 
+      const wasSettled = piece.settled;
       piece.settled = piece.settleTime >= 0.18;
+      if (!wasSettled && piece.settled) {
+        playSettleThud(piece.tier);
+      }
     }
 
     let maxPieceBottom = -Infinity;
@@ -973,7 +1052,8 @@
   }
 
   function drawDangerLine() {
-    const warningPulse = 0.5 + 0.5 * Math.sin(performance.now() * 0.012);
+    const pulseSpeed = dangerTimer > 1 ? 0.024 : 0.012;
+    const warningPulse = 0.5 + 0.5 * Math.sin(performance.now() * pulseSpeed);
     const isWarning = dangerActive && gamePhase === 'playing';
     const alpha = isWarning ? 0.72 + warningPulse * 0.28 : 0.45;
     ctx.strokeStyle = isWarning ? `rgba(255, 96, 96, ${alpha})` : 'rgba(255, 171, 90, 0.5)';
@@ -1006,6 +1086,28 @@
     ctx.shadowColor = 'rgba(255,80,80,0.95)';
     ctx.shadowBlur = 16;
     ctx.fillText(`RECOVER ${remaining.toFixed(1)}s`, WIDTH / 2, HEIGHT * 0.32);
+    ctx.restore();
+  }
+
+  function drawBestTierBanner() {
+    if (!bestTierBanner || gamePhase !== 'playing') return;
+    const p = 1 - bestTierBanner.life / bestTierBanner.maxLife;
+    const alpha = 1 - p;
+    const w = WELL.right - WELL.left - 70;
+    const h = 52;
+    const x = WELL.left + (WELL.right - WELL.left - w) / 2;
+    const y = WELL.top + 78;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = 'rgba(14, 30, 58, 0.88)';
+    ctx.strokeStyle = 'rgba(196, 226, 255, 0.95)';
+    ctx.lineWidth = 2;
+    roundRect(x, y, w, h, 14, true, true);
+    ctx.fillStyle = '#f2f8ff';
+    ctx.font = '900 24px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(bestTierBanner.text, WIDTH / 2, y + h / 2 + 1);
     ctx.restore();
   }
 
@@ -1142,6 +1244,17 @@
         ctx.beginPath();
         ctx.arc(fx.x, fx.y, fx.size, 0, Math.PI * 2);
         ctx.fill();
+      } else if (fx.type === 'chainText') {
+        const alpha = clamp(fx.life / fx.maxLife, 0, 1);
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = '#ffffff';
+        ctx.strokeStyle = 'rgba(9, 20, 40, 0.9)';
+        ctx.lineWidth = 4;
+        ctx.font = '900 24px Inter, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.strokeText(fx.text, fx.x, fx.y);
+        ctx.fillText(fx.text, fx.x, fx.y);
       }
     }
     ctx.globalAlpha = 1;
@@ -1149,6 +1262,7 @@
     if (paused && gamePhase === 'playing') overlayMessage('PAUSED', 'Press Pause again to resume');
     if (gamePhase === 'results') drawResultsOverlay();
     drawDangerWarning();
+    drawBestTierBanner();
 
     ctx.restore();
     ctx.restore();
