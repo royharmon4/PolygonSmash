@@ -25,11 +25,11 @@
   const WALL_BOUNCE = 0.12; // less wall correction after misses
   const PAIR_BOUNCE = 0.06; // keep pile motion, but reduce ping-pong bounces
   const MATCH_BOUNCE = 0.02; // matching tiers absorb more impact to encourage merges
-  const MERGE_CONTACT_SLOP = 6;
-  const MERGE_MIN_OVERLAP_RATIO = 0.02;
-  const MERGE_STABLE_CONTACT_TIME = 0.06;
-  const MERGE_MAX_SEPARATION_SPEED = 125;
-  const MERGE_MAX_RELATIVE_SPEED = 240;
+  const MERGE_CONTACT_SLOP = 9;
+  const MERGE_MIN_OVERLAP_RATIO = 0.012;
+  const MERGE_STABLE_CONTACT_TIME = 0.04;
+  const MERGE_MAX_SEPARATION_SPEED = 170;
+  const MERGE_MAX_RELATIVE_SPEED = 310;
   const LAUNCH_COOLDOWN = 0.42; // slower fire rate — can't spam out of trouble
   const FIXED_STEP = 1 / 60;
   const BASE_RADIUS = 24; // slightly bigger pieces — board fills faster
@@ -245,6 +245,43 @@
     osc.stop(now + 0.085);
   }
 
+  function playCollisionThunk(intensity = 1) {
+    const ac = ensureAudioContext();
+    if (!ac || !audioMaster || !noiseBuffer) return;
+    const now = ac.currentTime;
+    const loudness = clamp(intensity, 0.45, 1.35);
+
+    const noiseSource = ac.createBufferSource();
+    const lowpass = ac.createBiquadFilter();
+    const noiseGain = ac.createGain();
+    noiseSource.buffer = noiseBuffer;
+    lowpass.type = 'lowpass';
+    lowpass.frequency.setValueAtTime(350, now);
+    lowpass.Q.setValueAtTime(0.7, now);
+    noiseGain.gain.setValueAtTime(0.0001, now);
+    noiseGain.gain.exponentialRampToValueAtTime(0.012 * loudness, now + 0.004);
+    noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.055);
+    noiseSource.connect(lowpass);
+    lowpass.connect(noiseGain);
+    noiseGain.connect(audioMaster);
+
+    const osc = ac.createOscillator();
+    const toneGain = ac.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(95, now);
+    osc.frequency.exponentialRampToValueAtTime(72, now + 0.055);
+    toneGain.gain.setValueAtTime(0.0001, now);
+    toneGain.gain.exponentialRampToValueAtTime(0.028 * loudness, now + 0.003);
+    toneGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.06);
+    osc.connect(toneGain);
+    toneGain.connect(audioMaster);
+
+    noiseSource.start(now);
+    noiseSource.stop(now + 0.065);
+    osc.start(now);
+    osc.stop(now + 0.065);
+  }
+
   function resetGame() {
     pieces = [];
     effects = [];
@@ -355,6 +392,7 @@
       settleTime: 0,
       settled: false,
       touchingSupport: false,
+      impactSoundCooldown: 0,
     };
   }
 
@@ -706,6 +744,7 @@
       piece.age += dt;
       piece.cooldown = Math.max(0, piece.cooldown - dt);
       piece.mergeFlash = Math.max(0, piece.mergeFlash - dt);
+      piece.impactSoundCooldown = Math.max(0, piece.impactSoundCooldown - dt);
       piece.vy += GRAVITY * dt;
       piece.vx *= AIR_DRAG;
       piece.vy *= AIR_DRAG;
@@ -725,10 +764,21 @@
         piece.y = FIXED_CEILING_Y + piece.r;
         piece.touchingSupport = true;
         if (piece.vy < 0) piece.vy *= -WALL_BOUNCE;
+        if (piece.impactSoundCooldown <= 0 && Math.abs(piece.vy) > 28) {
+          playCollisionThunk(0.6 + piece.tier * 0.03);
+          piece.impactSoundCooldown = 0.06;
+        }
       }
       if (piece.y + piece.r > WELL.bottom) {
         piece.y = WELL.bottom - piece.r;
-        if (piece.vy > 0) piece.vy *= -WALL_BOUNCE;
+        if (piece.vy > 0) {
+          const impactSpeed = piece.vy;
+          piece.vy *= -WALL_BOUNCE;
+          if (piece.impactSoundCooldown <= 0 && impactSpeed > 28) {
+            playCollisionThunk(0.62 + piece.tier * 0.035);
+            piece.impactSoundCooldown = 0.07;
+          }
+        }
       }
     }
 
@@ -773,6 +823,15 @@
               a.vy -= impulse * ny;
               b.vx += impulse * nx;
               b.vy += impulse * ny;
+
+              const shouldThunk = a.tier !== b.tier;
+              const hardImpact = -speedAlongNormal > 68;
+              if (shouldThunk && hardImpact && a.impactSoundCooldown <= 0 && b.impactSoundCooldown <= 0) {
+                const impactTier = Math.max(a.tier, b.tier);
+                playCollisionThunk(0.58 + impactTier * 0.03);
+                a.impactSoundCooldown = 0.08;
+                b.impactSoundCooldown = 0.08;
+              }
             }
           }
 
