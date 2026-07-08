@@ -156,7 +156,7 @@ canvas {
 
 .controls {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 9px;
   margin-top: 10px;
 }
@@ -288,6 +288,17 @@ h2 {
   font-size: 0.74rem;
   font-weight: 900;
 }
+
+.triangle { background: #62b0ff; clip-path: polygon(50% 0%, 100% 100%, 0% 100%); }
+.square { background: #6ad4ff; clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%); }
+.pentagon { background: #6bf3d2; clip-path: polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%); }
+.hexagon { background: #8af17f; clip-path: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%); }
+.heptagon { background: #d7ec72; clip-path: polygon(50% 0%, 90% 20%, 100% 62%, 72% 100%, 28% 100%, 0% 62%, 10% 20%); }
+.octagon { background: #ffd166; clip-path: polygon(30% 0%, 70% 0%, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0% 70%, 0% 30%); }
+.nonagon { background: #ff9f6e; clip-path: polygon(50% 0%, 82% 12%, 100% 42%, 94% 76%, 67% 100%, 33% 100%, 6% 76%, 0% 42%, 18% 12%); }
+.decagon { background: #ff7196; clip-path: polygon(50% 0%, 80% 10%, 100% 35%, 100% 65%, 80% 90%, 50% 100%, 20% 90%, 0% 65%, 0% 35%, 20% 10%); }
+.hendecagon { background: #f784ff; clip-path: polygon(50% 0%, 77% 8%, 96% 28%, 100% 56%, 87% 82%, 64% 98%, 36% 98%, 13% 82%, 0% 56%, 4% 28%, 23% 8%); }
+.dodecagon { background: #ff5f7f; clip-path: polygon(50% 0%, 75% 7%, 93% 25%, 100% 50%, 93% 75%, 75% 93%, 50% 100%, 25% 93%, 7% 75%, 0% 50%, 7% 25%, 25% 7%); }
 
 @media (max-width: 860px) {
   body {
