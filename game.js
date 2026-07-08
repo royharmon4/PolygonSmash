@@ -12,34 +12,27 @@
   const HEIGHT = canvas.height;
   const MARGIN = 24;
   const WELL = { left: MARGIN, right: WIDTH - MARGIN, top: 10, bottom: HEIGHT - 34 };
-
-  // Launcher sits at the BOTTOM — shoots UPWARD
-  const LAUNCHER_Y = WELL.bottom - 30;
   const LAUNCHER_X = WIDTH / 2;
-
+  const LAUNCHER_Y = WELL.bottom - 32;
   const FIXED_CEILING_Y = WELL.top;
   const DANGER_Y = HEIGHT - 180;
-  const DANGER_GRACE_SECONDS = 2;
-  const GRAVITY = -640;
-  const AIR_DRAG = 0.992; // stronger drag for more deliberate placements
-  const WALL_BOUNCE = 0.12; // less wall correction after misses
-  const PAIR_BOUNCE = 0.06; // keep pile motion, but reduce ping-pong bounces
-  const MATCH_BOUNCE = 0.02; // matching tiers absorb more impact to encourage merges
-  const MERGE_CONTACT_SLOP = 9;
-  const MERGE_MIN_OVERLAP_RATIO = 0.012;
-  const MERGE_STABLE_CONTACT_TIME = 0.04;
-  const MERGE_MAX_SEPARATION_SPEED = 170;
-  const MERGE_MAX_RELATIVE_SPEED = 310;
-  const LAUNCH_COOLDOWN = 0.42; // slower fire rate — can't spam out of trouble
+
   const FIXED_STEP = 1 / 60;
-  const BASE_RADIUS = 24; // slightly bigger pieces — board fills faster
-  const EXPLOSION_RADIUS = BASE_RADIUS * 3.8; // smaller blast — decagon less OP
-  const BACKGROUND_STARS = Array.from({ length: 36 }, (_, i) => ({
-    x: (i * 73) % WIDTH,
-    y: (i * 127) % HEIGHT,
-    r: 1 + (i % 3),
-    a: 0.15 + (i % 5) * 0.08,
-  }));
+  const GRAVITY = -640;
+  const AIR_DRAG = 0.992;
+  const WALL_BOUNCE = 0.11;
+  const PAIR_BOUNCE = 0.05;
+  const MATCH_BOUNCE = 0.01;
+  const LAUNCH_SPEED = 700;
+  const LAUNCH_COOLDOWN = 0.42;
+  const BASE_RADIUS = 24;
+  const EXPLOSION_RADIUS = BASE_RADIUS * 3.8;
+  const DANGER_GRACE_SECONDS = 2;
+
+  const MERGE_SNAP_SLOP = 16;
+  const MERGE_MIN_CONTACT_TIME = 0.015;
+  const MERGE_MAX_RELATIVE_SPEED = 520;
+  const MERGE_MAX_SEPARATING_SPEED = 300;
 
   const TIERS = [
     { name: 'Triangle', sides: 3, radius: 1.0, score: 10, color: '#62b0ff', capstone: null },
@@ -60,21 +53,50 @@
       capstone: { behavior: 'explode_on_match', mergeScore: 25000, clearedTierScore: 120 },
     },
   ];
-  const NATURAL_SPAWN_WEIGHTS = [
+
+  const SPAWN_WEIGHTS = [
     { tier: 1, weight: 0.68 },
     { tier: 2, weight: 0.24 },
     { tier: 3, weight: 0.08 },
   ];
-  const MAX_TIER = TIERS.length;
 
-  // FIX 1 & 2: separate aim state from touch-fire state
-  // aimAngle is updated continuously; firing only happens on pointerup / touchend
-  let aimAngle = -Math.PI / 2; // default: straight up
+  const MAX_TIER = TIERS.length;
+  const BACKGROUND_STARS = Array.from({ length: 38 }, (_, i) => ({
+    x: (i * 73) % WIDTH,
+    y: (i * 127) % HEIGHT,
+    r: 1 + (i % 3),
+    a: 0.14 + (i % 5) * 0.08,
+  }));
+
   let pieces = [];
   let effects = [];
   let queuedMerges = [];
   let mergeContactTimes = new Map();
   let nextId = 1;
+  let score = 0;
+  let best = safeGetBest();
+  let nextTier = 1;
+  let queueTiers = [1, 1];
+  let aimAngle = -Math.PI / 2;
+  let launchCooldown = 0;
+  let paused = false;
+  let gamePhase = 'playing';
+  let gameOver = false;
+  let lastTime = 0;
+  let accumulator = 0;
+  let shakeFramesRemaining = 0;
+  let dangerTimer = 0;
+  let dangerActive = false;
+  let earnedBestTierThisRun = 0;
+  let bestStreakThisRun = 0;
+  let currentSafeStreak = 0;
+  let resultsButtonRect = null;
+  let finalRunStats = null;
+  let bestTierBanner = null;
+  let audioCtx = null;
+  let audioMaster = null;
+  let noiseBuffer = null;
+
   function safeGetBest() {
     try {
       return Number(window.localStorage?.getItem('polygon-smash-best') || '0');
@@ -89,234 +111,33 @@
     } catch {}
   }
 
-  let score = 0;
-  let best = safeGetBest();
-  let nextTier = 1; // what fires next (shown on barrel)
-  let queueTiers = [1, 1]; // two-piece preview queue
-  let launchCooldown = 0;
-  let lastTime = 0;
-  let accumulator = 0;
-  let shakeFramesRemaining = 0;
-  let paused = false;
-  let gameOver = false;
-  let gamePhase = 'playing'; // playing | results
-  let resultsButtonRect = null;
-  let bestTierThisRun = 1;
-  let bestStreakThisRun = 0;
-  let currentSafeStreak = 0;
-  let dangerTimer = 0;
-  let dangerActive = false;
-  let finalRunStats = null;
-  let audioCtx = null;
-  let audioMaster = null;
-  let noiseBuffer = null;
-  let bestTierBanner = null;
+  function clamp(v, lo, hi) {
+    return Math.max(lo, Math.min(hi, v));
+  }
 
-  function ensureAudioContext() {
-    if (!window.AudioContext && !window.webkitAudioContext) return null;
-    if (!audioCtx) {
-      const Ctor = window.AudioContext || window.webkitAudioContext;
-      audioCtx = new Ctor();
-      audioMaster = audioCtx.createGain();
-      audioMaster.gain.value = 0.3;
-      audioMaster.connect(audioCtx.destination);
+  function tierData(tier) {
+    return TIERS[tier - 1];
+  }
 
-      noiseBuffer = audioCtx.createBuffer(1, Math.floor(audioCtx.sampleRate * 0.4), audioCtx.sampleRate);
-      const data = noiseBuffer.getChannelData(0);
-      for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  function radiusForTier(tier) {
+    return BASE_RADIUS * tierData(tier).radius;
+  }
+
+  function randomSpawnTier() {
+    const roll = Math.random();
+    let running = 0;
+    for (const entry of SPAWN_WEIGHTS) {
+      running += entry.weight;
+      if (roll < running) return entry.tier;
     }
-    if (audioCtx.state === 'suspended') audioCtx.resume();
-    return audioCtx;
-  }
-
-  function playLaunchSound() {
-    const ac = ensureAudioContext();
-    if (!ac || !audioMaster) return;
-    const now = ac.currentTime;
-    const osc = ac.createOscillator();
-    const gain = ac.createGain();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(220, now);
-    osc.frequency.exponentialRampToValueAtTime(110, now + 0.08);
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.08, now + 0.008);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
-    osc.connect(gain);
-    gain.connect(audioMaster);
-    osc.start(now);
-    osc.stop(now + 0.085);
-  }
-
-  function mergeFrequencyForTier(tier) {
-    const clamped = clamp(tier, 1, MAX_TIER);
-    return 300 + ((clamped - 1) / (MAX_TIER - 1)) * (1200 - 300);
-  }
-
-  function playMergePop(tier, delay = 0, freqScale = 1) {
-    const ac = ensureAudioContext();
-    if (!ac || !audioMaster) return;
-    const start = ac.currentTime + delay;
-    const osc = ac.createOscillator();
-    const gain = ac.createGain();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(mergeFrequencyForTier(tier) * freqScale, start);
-    gain.gain.setValueAtTime(0.0001, start);
-    gain.gain.exponentialRampToValueAtTime(0.12, start + 0.01);
-    gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.1);
-    osc.connect(gain);
-    gain.connect(audioMaster);
-    osc.start(start);
-    osc.stop(start + 0.105);
-  }
-
-  function playMergeSound(tier) {
-    playMergePop(tier);
-  }
-
-  function playChainMergeSound(tier) {
-    playMergePop(tier);
-    playMergePop(tier, 0.05, 1.08);
-  }
-
-  function playExplosionSound() {
-    const ac = ensureAudioContext();
-    if (!ac || !audioMaster || !noiseBuffer) return;
-    const now = ac.currentTime;
-    const source = ac.createBufferSource();
-    const bandpass = ac.createBiquadFilter();
-    const gain = ac.createGain();
-    source.buffer = noiseBuffer;
-    bandpass.type = 'bandpass';
-    bandpass.frequency.setValueAtTime(150, now);
-    bandpass.Q.setValueAtTime(0.8, now);
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.18, now + 0.015);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.3);
-    source.connect(bandpass);
-    bandpass.connect(gain);
-    gain.connect(audioMaster);
-    source.start(now);
-    source.stop(now + 0.31);
-  }
-
-  function playGameOverSound() {
-    const ac = ensureAudioContext();
-    if (!ac || !audioMaster) return;
-    const notes = [440, 330, 220];
-    const now = ac.currentTime;
-    for (let i = 0; i < notes.length; i++) {
-      const start = now + i * 0.08;
-      const osc = ac.createOscillator();
-      const gain = ac.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(notes[i], start);
-      gain.gain.setValueAtTime(0.0001, start);
-      gain.gain.exponentialRampToValueAtTime(0.11, start + 0.008);
-      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.08);
-      osc.connect(gain);
-      gain.connect(audioMaster);
-      osc.start(start);
-      osc.stop(start + 0.085);
-    }
-  }
-
-  function settleFrequencyForTier(tier) {
-    const clamped = clamp(tier, 1, MAX_TIER);
-    const t = (clamped - 1) / (MAX_TIER - 1);
-    return 120 - t * 40;
-  }
-
-  function playSettleThud(tier) {
-    const ac = ensureAudioContext();
-    if (!ac || !audioMaster) return;
-    const now = ac.currentTime;
-    const osc = ac.createOscillator();
-    const gain = ac.createGain();
-    osc.type = 'sine';
-    const baseFreq = settleFrequencyForTier(tier);
-    osc.frequency.setValueAtTime(baseFreq, now);
-    osc.frequency.exponentialRampToValueAtTime(baseFreq * 0.85, now + 0.08);
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.045, now + 0.008);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
-    osc.connect(gain);
-    gain.connect(audioMaster);
-    osc.start(now);
-    osc.stop(now + 0.085);
-  }
-
-  function playCollisionThunk(intensity = 1) {
-    const ac = ensureAudioContext();
-    if (!ac || !audioMaster || !noiseBuffer) return;
-    const now = ac.currentTime;
-    const loudness = clamp(intensity, 0.45, 1.35);
-
-    const noiseSource = ac.createBufferSource();
-    const lowpass = ac.createBiquadFilter();
-    const noiseGain = ac.createGain();
-    noiseSource.buffer = noiseBuffer;
-    lowpass.type = 'lowpass';
-    lowpass.frequency.setValueAtTime(350, now);
-    lowpass.Q.setValueAtTime(0.7, now);
-    noiseGain.gain.setValueAtTime(0.0001, now);
-    noiseGain.gain.exponentialRampToValueAtTime(0.012 * loudness, now + 0.004);
-    noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.055);
-    noiseSource.connect(lowpass);
-    lowpass.connect(noiseGain);
-    noiseGain.connect(audioMaster);
-
-    const osc = ac.createOscillator();
-    const toneGain = ac.createGain();
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(95, now);
-    osc.frequency.exponentialRampToValueAtTime(72, now + 0.055);
-    toneGain.gain.setValueAtTime(0.0001, now);
-    toneGain.gain.exponentialRampToValueAtTime(0.028 * loudness, now + 0.003);
-    toneGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.06);
-    osc.connect(toneGain);
-    toneGain.connect(audioMaster);
-
-    noiseSource.start(now);
-    noiseSource.stop(now + 0.065);
-    osc.start(now);
-    osc.stop(now + 0.065);
-  }
-
-  function resetGame() {
-    pieces = [];
-    effects = [];
-    queuedMerges = [];
-    mergeContactTimes = new Map();
-    nextId = 1;
-    score = 0;
-    launchCooldown = 0;
-    shakeFramesRemaining = 0;
-    gameOver = false;
-    gamePhase = 'playing';
-    resultsButtonRect = null;
-    bestTierThisRun = 1;
-    bestStreakThisRun = 0;
-    currentSafeStreak = 0;
-    dangerTimer = 0;
-    dangerActive = false;
-    finalRunStats = null;
-    bestTierBanner = null;
-    paused = false;
-    aimAngle = -Math.PI / 2;
-    pauseBtn.textContent = 'Pause';
-    nextTier = randomSpawnTier();
-    queueTiers = [randomSpawnTier(), randomSpawnTier()];
-    updateHud();
+    return SPAWN_WEIGHTS[SPAWN_WEIGHTS.length - 1].tier;
   }
 
   function polygonClipPath(sides) {
-    if (sides <= 2) return 'none';
     const points = [];
     for (let i = 0; i < sides; i++) {
       const a = -Math.PI / 2 + i * ((Math.PI * 2) / sides);
-      const x = 50 + Math.cos(a) * 50;
-      const y = 50 + Math.sin(a) * 50;
-      points.push(`${x.toFixed(2)}% ${y.toFixed(2)}%`);
+      points.push(`${(50 + Math.cos(a) * 50).toFixed(2)}% ${(50 + Math.sin(a) * 50).toFixed(2)}%`);
     }
     return `polygon(${points.join(',')})`;
   }
@@ -340,39 +161,80 @@
     renderQueueSlot(queueSlot2El, queueTiers[1]);
   }
 
-  function regularPolygonCtx(c, cx, cy, r, sides, rotation) {
-    c.beginPath();
-    for (let i = 0; i < sides; i++) {
-      const a = rotation + i * ((Math.PI * 2) / sides);
-      const px = cx + Math.cos(a) * r;
-      const py = cy + Math.sin(a) * r;
-      i === 0 ? c.moveTo(px, py) : c.lineTo(px, py);
+  function ensureAudioContext() {
+    if (!window.AudioContext && !window.webkitAudioContext) return null;
+    if (!audioCtx) {
+      const Ctor = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new Ctor();
+      audioMaster = audioCtx.createGain();
+      audioMaster.gain.value = 0.28;
+      audioMaster.connect(audioCtx.destination);
+      noiseBuffer = audioCtx.createBuffer(1, Math.floor(audioCtx.sampleRate * 0.4), audioCtx.sampleRate);
+      const data = noiseBuffer.getChannelData(0);
+      for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
     }
-    c.closePath();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    return audioCtx;
   }
 
-  function randomSpawnTier() {
-    const roll = Math.random();
-    let runningWeight = 0;
-    for (const entry of NATURAL_SPAWN_WEIGHTS) {
-      runningWeight += entry.weight;
-      if (roll < runningWeight) return entry.tier;
-    }
-    return NATURAL_SPAWN_WEIGHTS[NATURAL_SPAWN_WEIGHTS.length - 1].tier;
+  function playTone(freq, duration = 0.085, volume = 0.08, type = 'sine', delay = 0) {
+    const ac = ensureAudioContext();
+    if (!ac || !audioMaster) return;
+    const start = ac.currentTime + delay;
+    const osc = ac.createOscillator();
+    const gain = ac.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, start);
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(volume, start + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+    osc.connect(gain);
+    gain.connect(audioMaster);
+    osc.start(start);
+    osc.stop(start + duration + 0.01);
   }
 
-  function validateSpawnWeights() {
-    const total = NATURAL_SPAWN_WEIGHTS.reduce((sum, entry) => sum + entry.weight, 0);
-    if (Math.abs(total - 1) > 0.001) {
-      throw new Error(`Spawn weights must sum to 1.0. Current total: ${total}`);
-    }
+  function playLaunchSound() {
+    playTone(180, 0.075, 0.075, 'sine');
   }
 
-  function tierData(tier) {
-    return TIERS[tier - 1];
+  function playMergeSound(tier, chainDepth = 1) {
+    const t = clamp(tier, 1, MAX_TIER);
+    const base = 300 + ((t - 1) / (MAX_TIER - 1)) * 900;
+    playTone(base, 0.095, 0.11, 'sine');
+    if (chainDepth > 1) playTone(base * 1.12, 0.095, 0.09, 'sine', 0.045);
   }
-  function radiusForTier(tier) {
-    return BASE_RADIUS * tierData(tier).radius;
+
+  function playCollisionThunk(intensity = 1) {
+    const ac = ensureAudioContext();
+    if (!ac || !audioMaster || !noiseBuffer) return;
+    const loudness = clamp(intensity, 0.45, 1.35);
+    const now = ac.currentTime;
+    const noiseSource = ac.createBufferSource();
+    const lowpass = ac.createBiquadFilter();
+    const noiseGain = ac.createGain();
+    noiseSource.buffer = noiseBuffer;
+    lowpass.type = 'lowpass';
+    lowpass.frequency.setValueAtTime(350, now);
+    noiseGain.gain.setValueAtTime(0.0001, now);
+    noiseGain.gain.exponentialRampToValueAtTime(0.012 * loudness, now + 0.004);
+    noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.055);
+    noiseSource.connect(lowpass);
+    lowpass.connect(noiseGain);
+    noiseGain.connect(audioMaster);
+    noiseSource.start(now);
+    noiseSource.stop(now + 0.065);
+  }
+
+  function playExplosionSound() {
+    playCollisionThunk(1.35);
+    playTone(110, 0.14, 0.11, 'sawtooth', 0.02);
+  }
+
+  function playGameOverSound() {
+    playTone(440, 0.08, 0.1, 'sine');
+    playTone(330, 0.08, 0.1, 'sine', 0.08);
+    playTone(220, 0.1, 0.1, 'sine', 0.16);
   }
 
   function createPiece(x, y, tier, vx = 0, vy = 0) {
@@ -385,15 +247,56 @@
       tier,
       r: radiusForTier(tier),
       age: 0,
-      cooldown: 0.2,
+      cooldown: 0.12,
       merged: false,
-      mergeFlash: 0,
-      mergeFlashMax: 0.15,
       settleTime: 0,
       settled: false,
       touchingSupport: false,
+      mergeFlash: 0,
+      mergeFlashMax: 0.15,
       impactSoundCooldown: 0,
     };
+  }
+
+  function resetGame() {
+    pieces = [];
+    effects = [];
+    queuedMerges = [];
+    mergeContactTimes = new Map();
+    nextId = 1;
+    score = 0;
+    launchCooldown = 0;
+    paused = false;
+    gamePhase = 'playing';
+    gameOver = false;
+    shakeFramesRemaining = 0;
+    dangerTimer = 0;
+    dangerActive = false;
+    earnedBestTierThisRun = 0;
+    bestStreakThisRun = 0;
+    currentSafeStreak = 0;
+    finalRunStats = null;
+    resultsButtonRect = null;
+    bestTierBanner = null;
+    aimAngle = -Math.PI / 2;
+    nextTier = randomSpawnTier();
+    queueTiers = [randomSpawnTier(), randomSpawnTier()];
+    pauseBtn.textContent = 'Pause';
+    updateHud();
+  }
+
+  function clientToCanvas(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (clientX - rect.left) * (WIDTH / rect.width),
+      y: (clientY - rect.top) * (HEIGHT / rect.height),
+    };
+  }
+
+  function aimAtCanvasPoint(cx, cy) {
+    let angle = Math.atan2(cy - LAUNCHER_Y, cx - LAUNCHER_X);
+    angle = clamp(angle, -Math.PI + 0.18, -0.18);
+    aimAngle = angle;
   }
 
   function launch() {
@@ -403,67 +306,28 @@
     const r = radiusForTier(tier);
     const dx = Math.cos(aimAngle);
     const dy = Math.sin(aimAngle);
-    // spawn just inside the bottom edge
-    const x = clamp(LAUNCHER_X + dx * 28, WELL.left + r, WELL.right - r);
-    const y = clamp(LAUNCHER_Y + dy * 10, FIXED_CEILING_Y + r, WELL.bottom - r);
-    pieces.push(createPiece(x, y, tier, dx * 700, dy * 700));
-    setBestTierThisRun(tier);
-    addDirectionalBurst(x, y, 7, tierData(tier).color, -dx, -dy, 0.5, 80, 170);
+    const x = clamp(LAUNCHER_X + dx * 46, WELL.left + r, WELL.right - r);
+    const y = clamp(LAUNCHER_Y + dy * 46, FIXED_CEILING_Y + r, WELL.bottom - r);
+    pieces.push(createPiece(x, y, tier, dx * LAUNCH_SPEED, dy * LAUNCH_SPEED));
+    addDirectionalBurst(x, y, 8, tierData(tier).color, -dx, -dy, 0.5, 80, 170);
     launchCooldown = LAUNCH_COOLDOWN;
-    playLaunchSound();
     nextTier = queueTiers.shift();
     queueTiers.push(randomSpawnTier());
+    playLaunchSound();
     updateHud();
   }
 
-  function clamp(v, lo, hi) {
-    return Math.max(lo, Math.min(hi, v));
+  function togglePause() {
+    if (gamePhase !== 'playing') return;
+    paused = !paused;
+    pauseBtn.textContent = paused ? 'Resume' : 'Pause';
   }
 
-  // FIX 1: correct aim — compute angle from launcher position to canvas point
-  // constrain to the upper hemisphere so you can only shoot upward
-  function aimAtCanvasPoint(cx, cy) {
-    const dx = cx - LAUNCHER_X;
-    const dy = cy - LAUNCHER_Y;
-    // only update if the pointer is above the launcher (or close)
-    let angle = Math.atan2(dy, dx);
-    // keep angle in the upper half: between ~-170° and ~-10° (pointing upward)
-    const MIN_ANGLE = -Math.PI + 0.18;
-    const MAX_ANGLE = -0.18;
-    angle = clamp(angle, MIN_ANGLE, MAX_ANGLE);
-    aimAngle = angle;
-  }
-
-  // Convert a pointer/touch client position to canvas-space coordinates
-  function clientToCanvas(clientX, clientY) {
-    const rect = canvas.getBoundingClientRect();
-    return {
-      x: (clientX - rect.left) * (WIDTH / rect.width),
-      y: (clientY - rect.top) * (HEIGHT / rect.height),
-    };
-  }
-
-  // ── Pointer events (mouse + stylus) ──────────────────────────────────
-  // Move → update aim only
   canvas.addEventListener('pointermove', (e) => {
     const p = clientToCanvas(e.clientX, e.clientY);
     aimAtCanvasPoint(p.x, p.y);
   });
 
-  // Click (pointerup on canvas) → aim + fire
-  canvas.addEventListener('pointerup', (e) => {
-    ensureAudioContext();
-    const p = clientToCanvas(e.clientX, e.clientY);
-    if (gamePhase === 'results' && isInResultsButton(p.x, p.y)) {
-      resetGame();
-      return;
-    }
-    aimAtCanvasPoint(p.x, p.y);
-    // Mouse launches on pointerdown for snappy controls; touch/pen launch on release.
-    if (e.pointerType !== 'mouse') launch();
-  });
-
-  // Also allow click to fire so mouse users get instant feedback on press
   canvas.addEventListener('pointerdown', (e) => {
     ensureAudioContext();
     const p = clientToCanvas(e.clientX, e.clientY);
@@ -472,65 +336,38 @@
       return;
     }
     aimAtCanvasPoint(p.x, p.y);
-    // Only fire on mouse (not touch — touch fires on touchend below)
     if (e.pointerType === 'mouse') launch();
   });
 
-  // ── Touch events (mobile) ─────────────────────────────────────────────
-  // FIX 2: touchmove = aim only, touchend = fire
-  canvas.addEventListener(
-    'touchmove',
-    (e) => {
-      e.preventDefault();
-      const t = e.touches[0];
-      const p = clientToCanvas(t.clientX, t.clientY);
-      aimAtCanvasPoint(p.x, p.y);
-    },
-    { passive: false },
-  );
+  canvas.addEventListener('pointerup', (e) => {
+    ensureAudioContext();
+    const p = clientToCanvas(e.clientX, e.clientY);
+    if (gamePhase === 'results' && isInResultsButton(p.x, p.y)) {
+      resetGame();
+      return;
+    }
+    aimAtCanvasPoint(p.x, p.y);
+    if (e.pointerType !== 'mouse') launch();
+  });
 
-  canvas.addEventListener(
-    'touchend',
-    (e) => {
-      e.preventDefault();
-      // Browsers with Pointer Events already fire via pointer handlers above.
-      if ('PointerEvent' in window) return;
-      // Use changedTouches for the final position
-      const t = e.changedTouches[0];
-      const p = clientToCanvas(t.clientX, t.clientY);
-      if (gamePhase === 'results' && isInResultsButton(p.x, p.y)) {
-        resetGame();
-        return;
-      }
-      aimAtCanvasPoint(p.x, p.y);
-      launch();
-    },
-    { passive: false },
-  );
+  canvas.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+  canvas.addEventListener('touchend', (e) => e.preventDefault(), { passive: false });
 
-  // ── Keyboard ──────────────────────────────────────────────────────────
   window.addEventListener('keydown', (e) => {
     ensureAudioContext();
     if (e.code === 'Space') {
       e.preventDefault();
       launch();
-    }
-    if (e.code === 'KeyR') resetGame();
-    if (e.code === 'KeyP') {
-      if (gamePhase !== 'playing') return;
-      paused = !paused;
-      pauseBtn.textContent = paused ? 'Resume' : 'Pause';
+    } else if (e.code === 'KeyR') {
+      resetGame();
+    } else if (e.code === 'KeyP') {
+      togglePause();
     }
   });
 
   restartBtn.addEventListener('click', resetGame);
-  pauseBtn.addEventListener('click', () => {
-    if (gamePhase !== 'playing') return;
-    paused = !paused;
-    pauseBtn.textContent = paused ? 'Resume' : 'Pause';
-  });
+  pauseBtn.addEventListener('click', togglePause);
 
-  // ── Merge helpers ─────────────────────────────────────────────────────
   function queueMerge(a, b) {
     if (!a || !b || a.merged || b.merged) return;
     a.merged = true;
@@ -538,70 +375,39 @@
     queuedMerges.push([a, b]);
   }
 
-  function setBestTierThisRun(tier) {
-    if (tier > bestTierThisRun) {
-      bestTierThisRun = tier;
-      const tierInfo = tierData(tier);
-      bestTierBanner = {
-        text: `NEW BEST TIER — ${tierInfo.name}!`,
-        life: 1.2,
-        maxLife: 1.2,
-      };
-    }
+  function removePiece(piece) {
+    const idx = pieces.indexOf(piece);
+    if (idx >= 0) pieces.splice(idx, 1);
   }
 
-  function applyMergeScreenshake(tier) {
-    let minFrames = 0;
-    let spread = 0;
-    if (tier >= 8) {
-      minFrames = 4;
-      spread = 2;
-    } else if (tier >= 5) {
-      minFrames = 2;
-      spread = 1;
-    }
-    if (minFrames === 0) return;
-    shakeFramesRemaining = Math.max(shakeFramesRemaining, minFrames + Math.floor(Math.random() * (spread + 1)));
-  }
-
-  function addChainText(x, y, chainDepth) {
-    effects.push({
-      type: 'chainText',
-      x,
-      y,
-      rise: 26,
-      text: `+CHAIN x${chainDepth}`,
-      life: 0.6,
-      maxLife: 0.6,
-    });
+  function recordEarnedTier(tier) {
+    if (tier <= earnedBestTierThisRun) return;
+    earnedBestTierThisRun = tier;
+    const info = tierData(tier);
+    bestTierBanner = {
+      text: `EARNED TIER ${tier} — ${info.name}!`,
+      life: 1.1,
+      maxLife: 1.1,
+    };
   }
 
   function processMerges() {
-    const chainConsumed = new Set();
-    let mergeCount = 0;
     let chainDepth = 0;
     while (queuedMerges.length > 0) {
       chainDepth++;
-      const mergesThisPass = queuedMerges;
+      const merges = queuedMerges;
       queuedMerges = [];
+      const consumed = new Set();
 
-      for (const [a, b] of mergesThisPass) {
-        if (
-          !pieces.includes(a) ||
-          !pieces.includes(b) ||
-          chainConsumed.has(a.id) ||
-          chainConsumed.has(b.id)
-        ) {
-          continue;
-        }
-
+      for (const [a, b] of merges) {
+        if (!pieces.includes(a) || !pieces.includes(b) || consumed.has(a.id) || consumed.has(b.id)) continue;
+        consumed.add(a.id);
+        consumed.add(b.id);
         const mx = (a.x + b.x) * 0.5;
         const my = (a.y + b.y) * 0.5;
         const tier = a.tier;
         removePiece(a);
         removePiece(b);
-        chainConsumed.add(a.id);
-        chainConsumed.add(b.id);
 
         const capstone = tierData(tier).capstone;
         if (capstone) {
@@ -609,63 +415,45 @@
           continue;
         }
 
-        const newTier = tier + 1;
-        setBestTierThisRun(newTier);
-        const piece = createPiece(
-          mx,
-          my,
-          newTier,
-          (a.vx + b.vx) * 0.18,
-          (a.vy + b.vy) * 0.18,
-        );
-        piece.cooldown = 0.22;
-        piece.mergeFlash = piece.mergeFlashMax;
-        if (chainDepth > 1) addChainText(mx, my - piece.r - 16, chainDepth);
-        pieces.push(piece);
+        const newTier = Math.min(tier + 1, MAX_TIER);
+        const mergedPiece = createPiece(mx, my, newTier, (a.vx + b.vx) * 0.12, (a.vy + b.vy) * 0.12);
+        mergedPiece.cooldown = 0.08;
+        mergedPiece.mergeFlash = mergedPiece.mergeFlashMax;
+        pieces.push(mergedPiece);
         score += tierData(newTier).score;
-        addPulse(mx, my, piece.r + 10, tierData(newTier).color, 0.25);
-        applyMergeScreenshake(newTier);
-        if (mergeCount === 0) {
-          playMergeSound(newTier);
-        } else {
-          playChainMergeSound(newTier);
-        }
-        mergeCount++;
+        recordEarnedTier(newTier);
+        if (chainDepth > 1) addChainText(mx, my - mergedPiece.r - 16, chainDepth);
+        addPulse(mx, my, mergedPiece.r + 12, tierData(newTier).color, 0.25);
+        playMergeSound(newTier, chainDepth);
+        if (newTier >= 5) shakeFramesRemaining = Math.max(shakeFramesRemaining, newTier >= 8 ? 5 : 3);
       }
-
     }
   }
 
-  function explode(x, y, capstoneConfig = null) {
-    playExplosionSound();
+  function explode(x, y, capstoneConfig) {
     const survivors = [];
     let cleared = 0;
     for (const piece of pieces) {
       const dx = piece.x - x;
       const dy = piece.y - y;
-      if (Math.hypot(dx, dy) <= EXPLOSION_RADIUS) {
-        cleared += capstoneConfig ? piece.tier * capstoneConfig.clearedTierScore : piece.tier;
+      const dist = Math.hypot(dx, dy);
+      if (dist <= EXPLOSION_RADIUS) {
+        cleared += piece.tier * capstoneConfig.clearedTierScore;
       } else {
-        const dist = Math.max(1, Math.hypot(dx, dy));
         const force = Math.max(0, 1 - (dist - EXPLOSION_RADIUS) / 90);
         if (force > 0) {
-          piece.vx += (dx / dist) * 180 * force;
-          piece.vy += (dy / dist) * 180 * force;
+          piece.vx += (dx / Math.max(1, dist)) * 180 * force;
+          piece.vy += (dy / Math.max(1, dist)) * 180 * force;
         }
         survivors.push(piece);
       }
     }
     pieces = survivors;
-    const capstoneMergeScore = capstoneConfig ? capstoneConfig.mergeScore : 1000;
-    score += capstoneMergeScore + cleared;
+    score += capstoneConfig.mergeScore + cleared;
     addPulse(x, y, EXPLOSION_RADIUS, '#ffd3a8', 0.55);
-    addBurst(x, y, 24, '#ffd3a8');
-    shakeFramesRemaining = Math.max(shakeFramesRemaining, 8 + Math.floor(Math.random() * 3));
-  }
-
-  function removePiece(piece) {
-    const i = pieces.indexOf(piece);
-    if (i >= 0) pieces.splice(i, 1);
+    addBurst(x, y, 26, '#ffd3a8');
+    shakeFramesRemaining = Math.max(shakeFramesRemaining, 9);
+    playExplosionSound();
   }
 
   function addPulse(x, y, radius, color, strength) {
@@ -690,7 +478,7 @@
     }
   }
 
-  function addDirectionalBurst(x, y, count, color, dirX, dirY, spread = 0.45, speedMin = 90, speedMax = 180) {
+  function addDirectionalBurst(x, y, count, color, dirX, dirY, spread, speedMin, speedMax) {
     const baseAngle = Math.atan2(dirY, dirX);
     for (let i = 0; i < count; i++) {
       const angle = baseAngle + (Math.random() * 2 - 1) * spread;
@@ -709,7 +497,10 @@
     }
   }
 
-  // ── Physics step ──────────────────────────────────────────────────────
+  function addChainText(x, y, chainDepth) {
+    effects.push({ type: 'chainText', x, y, rise: 28, text: `CHAIN x${chainDepth}`, life: 0.6, maxLife: 0.6 });
+  }
+
   function stepEffects(dt) {
     for (let i = effects.length - 1; i >= 0; i--) {
       const fx = effects[i];
@@ -738,9 +529,6 @@
 
     for (const piece of pieces) {
       piece.touchingSupport = false;
-    }
-
-    for (const piece of pieces) {
       piece.age += dt;
       piece.cooldown = Math.max(0, piece.cooldown - dt);
       piece.mergeFlash = Math.max(0, piece.mergeFlash - dt);
@@ -751,7 +539,6 @@
       piece.x += piece.vx * dt;
       piece.y += piece.vy * dt;
 
-      // Wall collisions
       if (piece.x - piece.r < WELL.left) {
         piece.x = WELL.left + piece.r;
         if (piece.vx < 0) piece.vx *= -WALL_BOUNCE;
@@ -764,42 +551,28 @@
         piece.y = FIXED_CEILING_Y + piece.r;
         piece.touchingSupport = true;
         if (piece.vy < 0) piece.vy *= -WALL_BOUNCE;
-        if (piece.impactSoundCooldown <= 0 && Math.abs(piece.vy) > 28) {
-          playCollisionThunk(0.6 + piece.tier * 0.03);
-          piece.impactSoundCooldown = 0.06;
-        }
       }
       if (piece.y + piece.r > WELL.bottom) {
         piece.y = WELL.bottom - piece.r;
-        if (piece.vy > 0) {
-          const impactSpeed = piece.vy;
-          piece.vy *= -WALL_BOUNCE;
-          if (piece.impactSoundCooldown <= 0 && impactSpeed > 28) {
-            playCollisionThunk(0.62 + piece.tier * 0.035);
-            piece.impactSoundCooldown = 0.07;
-          }
-        }
+        if (piece.vy > 0) piece.vy *= -WALL_BOUNCE;
       }
     }
 
-    // Piece-to-piece collisions & merge detection
     const nextMergeContactTimes = new Map();
     for (let pass = 0; pass < 2; pass++) {
       for (let i = 0; i < pieces.length; i++) {
         for (let j = i + 1; j < pieces.length; j++) {
           const a = pieces[i];
           const b = pieces[j];
+          if (a.merged || b.merged) continue;
           const dx = b.x - a.x;
           const dy = b.y - a.y;
           const dist = Math.hypot(dx, dy) || 0.0001;
           const minDist = a.r + b.r;
-          const mergeZoneDist = minDist + MERGE_CONTACT_SLOP;
-          if (dist > mergeZoneDist) continue;
-
           const nx = dx / dist;
           const ny = dy / dist;
-          const isOverlapping = dist < minDist;
-          const overlapRatio = isOverlapping ? (minDist - dist) / minDist : 0;
+          const overlap = minDist - dist;
+          const mergeZoneDist = minDist + MERGE_SNAP_SLOP;
           const rvx = b.vx - a.vx;
           const rvy = b.vy - a.vy;
           const speedAlongNormal = rvx * nx + rvy * ny;
@@ -807,14 +580,25 @@
           const separatingSpeed = Math.max(0, speedAlongNormal);
           const pairKey = a.id < b.id ? `${a.id}:${b.id}` : `${b.id}:${a.id}`;
 
-          if (isOverlapping) {
+          if (a.tier === b.tier && dist <= mergeZoneDist && a.cooldown <= 0 && b.cooldown <= 0) {
+            const prior = mergeContactTimes.get(pairKey) || 0;
+            const stableEnough = separatingSpeed <= MERGE_MAX_SEPARATING_SPEED && relativeSpeed <= MERGE_MAX_RELATIVE_SPEED;
+            const contactTime = stableEnough ? prior + dt : 0;
+            if (contactTime > 0) nextMergeContactTimes.set(pairKey, Math.min(0.5, contactTime));
+            if (overlap >= -MERGE_SNAP_SLOP || contactTime >= MERGE_MIN_CONTACT_TIME) {
+              queueMerge(a, b);
+              continue;
+            }
+          }
+
+          if (dist < minDist) {
             a.touchingSupport = true;
             b.touchingSupport = true;
-            const overlap = (minDist - dist) * 0.5;
-            a.x -= nx * overlap;
-            a.y -= ny * overlap;
-            b.x += nx * overlap;
-            b.y += ny * overlap;
+            const correction = overlap * 0.5;
+            a.x -= nx * correction;
+            a.y -= ny * correction;
+            b.x += nx * correction;
+            b.y += ny * correction;
 
             if (speedAlongNormal < 0) {
               const restitution = a.tier === b.tier ? MATCH_BOUNCE : PAIR_BOUNCE;
@@ -823,43 +607,17 @@
               a.vy -= impulse * ny;
               b.vx += impulse * nx;
               b.vy += impulse * ny;
-
-              const shouldThunk = a.tier !== b.tier;
-              const hardImpact = -speedAlongNormal > 68;
-              if (shouldThunk && hardImpact && a.impactSoundCooldown <= 0 && b.impactSoundCooldown <= 0) {
-                const impactTier = Math.max(a.tier, b.tier);
-                playCollisionThunk(0.58 + impactTier * 0.03);
+              if (a.tier !== b.tier && -speedAlongNormal > 70 && a.impactSoundCooldown <= 0 && b.impactSoundCooldown <= 0) {
+                playCollisionThunk(0.58 + Math.max(a.tier, b.tier) * 0.03);
                 a.impactSoundCooldown = 0.08;
                 b.impactSoundCooldown = 0.08;
               }
             }
           }
-
-          const priorContact = mergeContactTimes.get(pairKey) || 0;
-          const stableThisFrame = separatingSpeed <= MERGE_MAX_SEPARATION_SPEED;
-          const contactTime = stableThisFrame ? priorContact + dt : 0;
-          if (contactTime > 0) {
-            nextMergeContactTimes.set(pairKey, Math.min(0.5, contactTime));
-          }
-
-          if (
-            a.tier === b.tier &&
-            !a.merged &&
-            !b.merged &&
-            a.cooldown <= 0 &&
-            b.cooldown <= 0 &&
-            stableThisFrame &&
-            relativeSpeed <= MERGE_MAX_RELATIVE_SPEED &&
-            (isOverlapping || contactTime >= MERGE_STABLE_CONTACT_TIME) &&
-            (overlapRatio >= MERGE_MIN_OVERLAP_RATIO || contactTime >= MERGE_STABLE_CONTACT_TIME)
-          ) {
-            queueMerge(a, b);
-          }
         }
       }
     }
     mergeContactTimes = nextMergeContactTimes;
-
     processMerges();
 
     for (const piece of pieces) {
@@ -869,24 +627,13 @@
         piece.vy *= 0.992;
       }
       const canSettle = piece.age > 0.2 && piece.touchingSupport && speed < 65;
-
-      if (canSettle) {
-        piece.settleTime = Math.min(1, piece.settleTime + dt);
-      } else {
-        piece.settleTime = Math.max(0, piece.settleTime - dt * 2);
-      }
-
-      const wasSettled = piece.settled;
+      piece.settleTime = canSettle ? Math.min(1, piece.settleTime + dt) : Math.max(0, piece.settleTime - dt * 2);
       piece.settled = piece.settleTime >= 0.18;
-      if (!wasSettled && piece.settled) {
-        playSettleThud(piece.tier);
-      }
     }
 
     let maxPieceBottom = -Infinity;
     for (const piece of pieces) {
-      if (!piece.settled) continue;
-      maxPieceBottom = Math.max(maxPieceBottom, piece.y + piece.r);
+      if (piece.settled) maxPieceBottom = Math.max(maxPieceBottom, piece.y + piece.r);
     }
 
     dangerActive = maxPieceBottom !== -Infinity && maxPieceBottom > DANGER_Y;
@@ -899,12 +646,10 @@
       bestStreakThisRun = Math.max(bestStreakThisRun, currentSafeStreak);
     }
 
-    if (dangerTimer >= DANGER_GRACE_SECONDS && !gameOver) {
-      triggerGameOver();
-    }
+    if (dangerTimer >= DANGER_GRACE_SECONDS && !gameOver) triggerGameOver();
 
-    if (!gameOver) {
-      best = Math.max(best, Math.floor(score));
+    if (!gameOver && Math.floor(score) > best) {
+      best = Math.floor(score);
       safeSetBest(best);
     }
   }
@@ -912,20 +657,19 @@
   function triggerGameOver() {
     gameOver = true;
     gamePhase = 'results';
-    playGameOverSound();
     best = Math.max(best, Math.floor(score));
     safeSetBest(best);
-    updateHud();
-    addBurst(WIDTH / 2, DANGER_Y, 28, '#ff7777');
     finalRunStats = {
       score: Math.floor(score),
       best,
-      bestTier: bestTierThisRun,
+      earnedTier: earnedBestTierThisRun,
       bestStreak: bestStreakThisRun,
     };
+    addBurst(WIDTH / 2, DANGER_Y, 28, '#ff7777');
+    playGameOverSound();
+    updateHud();
   }
 
-  // ── Drawing helpers ───────────────────────────────────────────────────
   function regularPolygon(cx, cy, r, sides, rotation) {
     ctx.beginPath();
     for (let i = 0; i < sides; i++) {
@@ -935,39 +679,6 @@
       i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
     }
     ctx.closePath();
-  }
-
-  function drawPiece(piece) {
-    const tier = tierData(piece.tier);
-    const baseRot = -Math.PI / 2 + piece.tier * 0.07;
-    ctx.save();
-    ctx.translate(piece.x, piece.y);
-    ctx.rotate(baseRot);
-    let flashMix = 0;
-    if (piece.mergeFlash > 0) {
-      const t = 1 - piece.mergeFlash / piece.mergeFlashMax;
-      const scale = t < 0.5 ? 1 + t * 0.4 : 1.2 - (t - 0.5) * 0.4;
-      ctx.scale(scale, scale);
-      flashMix = 1 - t;
-    }
-    regularPolygon(0, 0, piece.r * 0.92, tier.sides, 0);
-    ctx.fillStyle = flashMix > 0 ? `rgba(255,255,255,${flashMix})` : tier.color;
-    ctx.fill();
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
-    ctx.shadowColor = 'rgba(122, 195, 255, 0.6)';
-    ctx.shadowBlur = 9;
-    ctx.stroke();
-    ctx.shadowBlur = 0;
-    regularPolygon(0, 0, piece.r * 0.52, tier.sides, Math.PI / tier.sides);
-    ctx.fillStyle = 'rgba(255,255,255,0.16)';
-    ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.6)';
-    ctx.font = `700 ${Math.max(12, piece.r * 0.6)}px Inter, sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(String(piece.tier), 0, 1);
-    ctx.restore();
   }
 
   function roundRect(x, y, w, h, r, fill, stroke) {
@@ -982,14 +693,43 @@
     if (stroke) ctx.stroke();
   }
 
+  function drawPiece(piece) {
+    const data = tierData(piece.tier);
+    ctx.save();
+    ctx.translate(piece.x, piece.y);
+    ctx.rotate(-Math.PI / 2 + piece.tier * 0.07);
+    if (piece.mergeFlash > 0) {
+      const t = 1 - piece.mergeFlash / piece.mergeFlashMax;
+      const scale = t < 0.5 ? 1 + t * 0.4 : 1.2 - (t - 0.5) * 0.4;
+      ctx.scale(scale, scale);
+    }
+    regularPolygon(0, 0, piece.r * 0.92, data.sides, 0);
+    ctx.fillStyle = data.color;
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+    ctx.shadowColor = 'rgba(122,195,255,0.6)';
+    ctx.shadowBlur = 9;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    regularPolygon(0, 0, piece.r * 0.52, data.sides, Math.PI / data.sides);
+    ctx.fillStyle = 'rgba(255,255,255,0.16)';
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.62)';
+    ctx.font = `700 ${Math.max(12, piece.r * 0.6)}px Inter, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(piece.tier), 0, 1);
+    ctx.restore();
+  }
+
   function drawAimLine() {
-    const len = 130;
+    const len = 145;
     const ax = LAUNCHER_X + Math.cos(aimAngle) * len;
     const ay = LAUNCHER_Y + Math.sin(aimAngle) * len;
     const glow = ctx.createLinearGradient(LAUNCHER_X, LAUNCHER_Y, ax, ay);
     glow.addColorStop(0, 'rgba(133,184,255,0.24)');
     glow.addColorStop(1, 'rgba(133,184,255,0.95)');
-
     ctx.setLineDash([14, 8]);
     ctx.strokeStyle = glow;
     ctx.lineWidth = 2.5;
@@ -998,104 +738,111 @@
     ctx.lineTo(ax, ay);
     ctx.stroke();
     ctx.setLineDash([]);
-
-    const closeLen = 66;
-    const closeX = LAUNCHER_X + Math.cos(aimAngle) * closeLen;
-    const closeY = LAUNCHER_Y + Math.sin(aimAngle) * closeLen;
-    ctx.strokeStyle = 'rgba(220,238,255,0.45)';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(LAUNCHER_X, LAUNCHER_Y);
-    ctx.lineTo(closeX, closeY);
-    ctx.stroke();
-
     ctx.beginPath();
     ctx.arc(ax, ay, 5, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(180,220,255,0.94)';
     ctx.fill();
-    ctx.strokeStyle = 'rgba(230,245,255,0.92)';
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
   }
 
   function drawLauncher() {
-    const tier = tierData(nextTier);
-    const barrelLen = 44;
+    const data = tierData(nextTier);
+    const dx = Math.cos(aimAngle);
+    const dy = Math.sin(aimAngle);
+    const barrelLen = 50;
+    const tipX = LAUNCHER_X + dx * barrelLen;
+    const tipY = LAUNCHER_Y + dy * barrelLen;
     const cooldownProgress = clamp(1 - launchCooldown / LAUNCH_COOLDOWN, 0, 1);
 
-    // barrel (rotates with aim)
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = 'rgba(141,192,255,0.88)';
+    ctx.lineWidth = 15;
+    ctx.beginPath();
+    ctx.moveTo(LAUNCHER_X, LAUNCHER_Y);
+    ctx.lineTo(tipX, tipY);
+    ctx.stroke();
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = 'rgba(255,255,255,0.72)';
+    ctx.beginPath();
+    ctx.moveTo(LAUNCHER_X, LAUNCHER_Y);
+    ctx.lineTo(tipX, tipY);
+    ctx.stroke();
+    ctx.lineCap = 'butt';
+
+    const pieceR = radiusForTier(nextTier) * 0.76;
     ctx.save();
     ctx.translate(LAUNCHER_X, LAUNCHER_Y);
-    ctx.rotate(aimAngle);
-    ctx.fillStyle = '#8dc0ff';
-    roundRect(-8, -barrelLen, 16, barrelLen, 8, true, false);
-
-    // current piece floating at barrel tip
-    const pieceR = radiusForTier(nextTier) * 0.72;
-    const tipX = 0;
-    const tipY = -(barrelLen + pieceR + 4);
-    regularPolygon(tipX, tipY, pieceR * 0.92, tier.sides, -Math.PI / 2);
-    ctx.fillStyle = tier.color;
+    regularPolygon(0, 0, pieceR, data.sides, -Math.PI / 2);
+    ctx.fillStyle = data.color;
+    ctx.shadowColor = data.color;
+    ctx.shadowBlur = 15;
     ctx.fill();
-    ctx.lineWidth = 2.5;
-    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+    ctx.shadowBlur = 0;
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(255,255,255,0.94)';
     ctx.stroke();
-    // inner highlight
-    regularPolygon(tipX, tipY, pieceR * 0.52, tier.sides, Math.PI / tier.sides);
+    regularPolygon(0, 0, pieceR * 0.52, data.sides, Math.PI / data.sides);
     ctx.fillStyle = 'rgba(255,255,255,0.18)';
     ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.62)';
-    ctx.font = `700 ${Math.max(10, pieceR * 0.9)}px Inter, sans-serif`;
+    ctx.fillStyle = 'rgba(255,255,255,0.78)';
+    ctx.font = `800 ${Math.max(12, pieceR * 0.72)}px Inter, sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(String(nextTier), tipX, tipY + 1);
-
+    ctx.fillText(String(nextTier), 0, 1);
     ctx.restore();
 
-    // base circle
-    ctx.beginPath();
-    ctx.arc(LAUNCHER_X, LAUNCHER_Y, 18, 0, Math.PI * 2);
-    ctx.fillStyle = '#5d94f2';
-    ctx.fill();
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
-    ctx.stroke();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = 'rgba(230,245,255,0.72)';
+    ctx.font = '900 11px Inter, sans-serif';
+    ctx.fillText('NOW', LAUNCHER_X, LAUNCHER_Y + pieceR + 8);
 
-    // power indicator ring around launcher base
-    const start = -Math.PI / 2;
-    const end = start + cooldownProgress * Math.PI * 2;
     ctx.lineWidth = 4;
     ctx.strokeStyle = 'rgba(255,255,255,0.25)';
     ctx.beginPath();
-    ctx.arc(LAUNCHER_X, LAUNCHER_Y, 24, 0, Math.PI * 2);
+    ctx.arc(LAUNCHER_X, LAUNCHER_Y, pieceR + 9, 0, Math.PI * 2);
     ctx.stroke();
     ctx.strokeStyle = cooldownProgress >= 1 ? '#7fffd4' : '#8dc0ff';
     ctx.beginPath();
-    ctx.arc(LAUNCHER_X, LAUNCHER_Y, 24, start, end);
+    ctx.arc(LAUNCHER_X, LAUNCHER_Y, pieceR + 9, -Math.PI / 2, -Math.PI / 2 + cooldownProgress * Math.PI * 2);
     ctx.stroke();
   }
 
   function drawCeiling() {
     const pulse = 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(performance.now() * 0.0032));
-    const lineY = FIXED_CEILING_Y;
-    const shadowHeight = 72;
-
-    const shadow = ctx.createLinearGradient(0, lineY, 0, lineY + shadowHeight);
-    shadow.addColorStop(0, `rgba(109, 219, 255, ${0.24 * pulse})`);
-    shadow.addColorStop(0.5, `rgba(109, 219, 255, ${0.1 * pulse})`);
-    shadow.addColorStop(1, 'rgba(109, 219, 255, 0)');
+    const shadow = ctx.createLinearGradient(0, FIXED_CEILING_Y, 0, FIXED_CEILING_Y + 72);
+    shadow.addColorStop(0, `rgba(109,219,255,${0.24 * pulse})`);
+    shadow.addColorStop(1, 'rgba(109,219,255,0)');
     ctx.fillStyle = shadow;
-    ctx.fillRect(WELL.left + 8, lineY, WELL.right - WELL.left - 16, shadowHeight);
-
-    ctx.strokeStyle = `rgba(137, 233, 255, ${0.76 + 0.2 * pulse})`;
-    ctx.shadowColor = `rgba(86, 208, 255, ${0.55 + 0.3 * pulse})`;
+    ctx.fillRect(WELL.left + 8, FIXED_CEILING_Y, WELL.right - WELL.left - 16, 72);
+    ctx.strokeStyle = `rgba(137,233,255,${0.76 + 0.2 * pulse})`;
+    ctx.shadowColor = `rgba(86,208,255,${0.55 + 0.3 * pulse})`;
     ctx.shadowBlur = 18;
     ctx.lineWidth = 4;
     ctx.beginPath();
-    ctx.moveTo(WELL.left + 10, lineY);
-    ctx.lineTo(WELL.right - 10, lineY);
+    ctx.moveTo(WELL.left + 10, FIXED_CEILING_Y);
+    ctx.lineTo(WELL.right - 10, FIXED_CEILING_Y);
     ctx.stroke();
     ctx.shadowBlur = 0;
+  }
+
+  function drawDangerLine() {
+    const warningPulse = 0.5 + 0.5 * Math.sin(performance.now() * (dangerTimer > 1 ? 0.024 : 0.012));
+    const isWarning = dangerActive && gamePhase === 'playing';
+    const alpha = isWarning ? 0.72 + warningPulse * 0.28 : 0.45;
+    ctx.strokeStyle = isWarning ? `rgba(255,96,96,${alpha})` : 'rgba(255,171,90,0.5)';
+    ctx.shadowColor = isWarning ? `rgba(255,96,96,${alpha})` : 'rgba(255,171,90,0.42)';
+    ctx.shadowBlur = isWarning ? 16 : 8;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(WELL.left + 10, DANGER_Y);
+    ctx.lineTo(WELL.right - 10, DANGER_Y);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = isWarning ? 'rgba(255,205,205,0.95)' : 'rgba(255,225,178,0.88)';
+    ctx.font = '700 14px Inter, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText('DANGER LINE', WELL.left + 14, DANGER_Y - 8);
   }
 
   function overlayMessage(title, subtitle) {
@@ -1110,34 +857,11 @@
     ctx.fillText(subtitle, WIDTH / 2, HEIGHT / 2 + 24);
   }
 
-  function drawDangerLine() {
-    const pulseSpeed = dangerTimer > 1 ? 0.024 : 0.012;
-    const warningPulse = 0.5 + 0.5 * Math.sin(performance.now() * pulseSpeed);
-    const isWarning = dangerActive && gamePhase === 'playing';
-    const alpha = isWarning ? 0.72 + warningPulse * 0.28 : 0.45;
-    ctx.strokeStyle = isWarning ? `rgba(255, 96, 96, ${alpha})` : 'rgba(255, 171, 90, 0.5)';
-    ctx.lineWidth = 4;
-    ctx.shadowColor = isWarning ? `rgba(255, 96, 96, ${alpha})` : 'rgba(255, 171, 90, 0.42)';
-    ctx.shadowBlur = isWarning ? 16 : 8;
-    ctx.beginPath();
-    ctx.moveTo(WELL.left + 10, DANGER_Y);
-    ctx.lineTo(WELL.right - 10, DANGER_Y);
-    ctx.stroke();
-    ctx.shadowBlur = 0;
-
-    ctx.fillStyle = isWarning ? 'rgba(255, 205, 205, 0.95)' : 'rgba(255, 225, 178, 0.88)';
-    ctx.font = '700 14px Inter, sans-serif';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'bottom';
-    ctx.fillText('DANGER LINE', WELL.left + 14, DANGER_Y - 8);
-  }
-
   function drawDangerWarning() {
     if (!dangerActive || gamePhase !== 'playing') return;
     const remaining = Math.max(0, DANGER_GRACE_SECONDS - dangerTimer);
-    const alpha = clamp(0.45 + (dangerTimer / DANGER_GRACE_SECONDS) * 0.55, 0.45, 1);
     ctx.save();
-    ctx.globalAlpha = alpha;
+    ctx.globalAlpha = clamp(0.45 + (dangerTimer / DANGER_GRACE_SECONDS) * 0.55, 0.45, 1);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.font = '900 48px Inter, sans-serif';
@@ -1158,12 +882,12 @@
     const y = WELL.top + 78;
     ctx.save();
     ctx.globalAlpha = alpha;
-    ctx.fillStyle = 'rgba(14, 30, 58, 0.88)';
-    ctx.strokeStyle = 'rgba(196, 226, 255, 0.95)';
+    ctx.fillStyle = 'rgba(14,30,58,0.88)';
+    ctx.strokeStyle = 'rgba(196,226,255,0.95)';
     ctx.lineWidth = 2;
     roundRect(x, y, w, h, 14, true, true);
     ctx.fillStyle = '#f2f8ff';
-    ctx.font = '900 24px Inter, sans-serif';
+    ctx.font = '900 22px Inter, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(bestTierBanner.text, WIDTH / 2, y + h / 2 + 1);
@@ -1172,21 +896,11 @@
 
   function isInResultsButton(x, y) {
     if (!resultsButtonRect) return false;
-    return (
-      x >= resultsButtonRect.x &&
-      x <= resultsButtonRect.x + resultsButtonRect.w &&
-      y >= resultsButtonRect.y &&
-      y <= resultsButtonRect.y + resultsButtonRect.h
-    );
+    return x >= resultsButtonRect.x && x <= resultsButtonRect.x + resultsButtonRect.w && y >= resultsButtonRect.y && y <= resultsButtonRect.y + resultsButtonRect.h;
   }
 
   function drawResultsOverlay() {
-    const stats = finalRunStats || {
-      score: Math.floor(score),
-      best,
-      bestTier: bestTierThisRun,
-      bestStreak: bestStreakThisRun,
-    };
+    const stats = finalRunStats || { score: Math.floor(score), best, earnedTier: earnedBestTierThisRun, bestStreak: bestStreakThisRun };
     const panelW = WELL.right - WELL.left - 36;
     const panelH = 384;
     const panelX = WELL.left + (WELL.right - WELL.left - panelW) / 2;
@@ -1197,18 +911,17 @@
     ctx.strokeStyle = 'rgba(166,209,255,0.55)';
     ctx.lineWidth = 2;
     roundRect(panelX, panelY, panelW, panelH, 20, true, true);
-
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = '#f1f7ff';
     ctx.font = '900 34px Inter, sans-serif';
     ctx.fillText('RUN OVER', WIDTH / 2, panelY + 42);
 
-    const tierInfo = tierData(stats.bestTier);
+    const earnedText = stats.earnedTier > 0 ? `${stats.earnedTier} (${tierData(stats.earnedTier).name})` : 'None yet';
     const rows = [
       `Final Score: ${stats.score.toLocaleString()}`,
       `Best Score: ${stats.best.toLocaleString()}`,
-      `Highest Tier: ${stats.bestTier} (${tierInfo.name})`,
+      `Highest Earned: ${earnedText}`,
       `Tier Ladder: ${MAX_TIER} fixed tiers`,
       `Best Streak: ${stats.bestStreak.toFixed(1)}s`,
     ];
@@ -1230,17 +943,11 @@
     ctx.fillText('PLAY AGAIN', WIDTH / 2, btnY + btnH / 2 + 1);
   }
 
-  // ── Main draw ─────────────────────────────────────────────────────────
   function draw() {
     ctx.clearRect(0, 0, WIDTH, HEIGHT);
     ctx.save();
-    if (shakeFramesRemaining > 0) {
-      const shakeX = (Math.random() * 2 - 1) * 3;
-      const shakeY = (Math.random() * 2 - 1) * 3;
-      ctx.translate(shakeX, shakeY);
-    }
+    if (shakeFramesRemaining > 0) ctx.translate((Math.random() * 2 - 1) * 3, (Math.random() * 2 - 1) * 3);
 
-    // Well background
     const grad = ctx.createLinearGradient(0, WELL.top, 0, WELL.bottom);
     grad.addColorStop(0, '#0e1b35');
     grad.addColorStop(1, '#091120');
@@ -1248,11 +955,9 @@
     roundRect(WELL.left, WELL.top, WELL.right - WELL.left, WELL.bottom - WELL.top, 20, true, false);
 
     ctx.save();
-    ctx.beginPath();
     roundRect(WELL.left, WELL.top, WELL.right - WELL.left, WELL.bottom - WELL.top, 20, false, false);
     ctx.clip();
 
-    // Stars
     for (const s of BACKGROUND_STARS) {
       ctx.globalAlpha = s.a;
       ctx.fillStyle = '#d7e6ff';
@@ -1262,7 +967,6 @@
     }
     ctx.globalAlpha = 1;
 
-    // Grid lines
     ctx.strokeStyle = 'rgba(255,255,255,0.07)';
     ctx.lineWidth = 1;
     for (let y = WELL.top + 28; y < WELL.bottom; y += 42) {
@@ -1272,22 +976,16 @@
       ctx.stroke();
     }
 
-    // Well border
     ctx.strokeStyle = 'rgba(255,255,255,0.08)';
     ctx.lineWidth = 2;
     roundRect(WELL.left, WELL.top, WELL.right - WELL.left, WELL.bottom - WELL.top, 20, false, true);
 
     drawCeiling();
     drawDangerLine();
-
-    // Aim line & launcher
     drawAimLine();
     drawLauncher();
-
-    // Pieces
     for (const piece of pieces) drawPiece(piece);
 
-    // Effects
     for (const fx of effects) {
       if (fx.type === 'pulse') {
         const p = 1 - fx.life / fx.maxLife;
@@ -1307,7 +1005,7 @@
         const alpha = clamp(fx.life / fx.maxLife, 0, 1);
         ctx.globalAlpha = alpha;
         ctx.fillStyle = '#ffffff';
-        ctx.strokeStyle = 'rgba(9, 20, 40, 0.9)';
+        ctx.strokeStyle = 'rgba(9,20,40,0.9)';
         ctx.lineWidth = 4;
         ctx.font = '900 24px Inter, sans-serif';
         ctx.textAlign = 'center';
@@ -1327,7 +1025,6 @@
     ctx.restore();
   }
 
-  // ── Game loop ─────────────────────────────────────────────────────────
   function frame(ts) {
     if (!lastTime) lastTime = ts;
     const dt = Math.min(0.033, (ts - lastTime) / 1000);
@@ -1340,11 +1037,6 @@
         stepEffects(FIXED_STEP);
         accumulator -= FIXED_STEP;
       }
-      if (Math.floor(score) > best) {
-        best = Math.floor(score);
-        safeSetBest(best);
-        updateHud();
-      }
     } else {
       accumulator = 0;
       stepEffects(dt);
@@ -1356,7 +1048,6 @@
     requestAnimationFrame(frame);
   }
 
-  validateSpawnWeights();
   resetGame();
   requestAnimationFrame(frame);
 })();
