@@ -40,6 +40,12 @@
   const MERGE_MAX_RELATIVE_SPEED = 520;
   const MERGE_MAX_SEPARATING_SPEED = 300;
 
+  const STATES = Object.freeze({
+    PLAYING: 'playing',
+    PAUSED: 'paused',
+    RESULTS: 'results',
+  });
+
   const TIERS = [
     { name: 'Triangle', sides: 3, radius: 1.0, score: 10, color: '#62b0ff', capstone: null },
     { name: 'Square', sides: 4, radius: 1.12, score: 30, color: '#6ad4ff', capstone: null },
@@ -85,9 +91,7 @@
   let queueTiers = [1, 1];
   let aimAngle = -Math.PI / 2;
   let launchCooldown = 0;
-  let paused = false;
-  let gamePhase = 'playing';
-  let gameOver = false;
+  let state = STATES.PLAYING;
   let lastTime = 0;
   let accumulator = 0;
   let shakeFramesRemaining = 0;
@@ -119,6 +123,15 @@
 
   function clamp(v, lo, hi) {
     return Math.max(lo, Math.min(hi, v));
+  }
+
+  function setGameState(nextState) {
+    if (state === nextState) return;
+    state = nextState;
+    if (state !== STATES.PLAYING) pressedKeys.clear();
+    pauseBtn.textContent = state === STATES.PAUSED ? 'Resume' : 'Pause';
+    if (state === STATES.RESULTS) showPlayAgainButton();
+    else hidePlayAgainButton();
   }
 
   function tierData(tier) {
@@ -300,9 +313,6 @@
     nextId = 1;
     score = 0;
     launchCooldown = 0;
-    paused = false;
-    gamePhase = 'playing';
-    gameOver = false;
     shakeFramesRemaining = 0;
     dangerTimer = 0;
     dangerActive = false;
@@ -314,8 +324,7 @@
     aimAngle = -Math.PI / 2;
     nextTier = randomSpawnTier();
     queueTiers = [randomSpawnTier(), randomSpawnTier()];
-    pauseBtn.textContent = 'Pause';
-    hidePlayAgainButton();
+    setGameState(STATES.PLAYING);
     updateHud();
     window.requestAnimationFrame(() => canvas.focus());
   }
@@ -333,7 +342,7 @@
   }
 
   function applyKeyboardAim(dt) {
-    if (gamePhase !== 'playing' || paused) return;
+    if (state !== STATES.PLAYING) return;
     const leftPressed = pressedKeys.has('ArrowLeft') || pressedKeys.has('KeyA');
     const rightPressed = pressedKeys.has('ArrowRight') || pressedKeys.has('KeyD');
     if (leftPressed === rightPressed) return;
@@ -342,7 +351,7 @@
   }
 
   function launch() {
-    if (gamePhase !== 'playing' || paused || launchCooldown > 0) return;
+    if (state !== STATES.PLAYING || launchCooldown > 0) return;
     ensureAudioContext();
     const tier = nextTier;
     const r = radiusForTier(tier);
@@ -360,9 +369,8 @@
   }
 
   function togglePause() {
-    if (gamePhase !== 'playing') return;
-    paused = !paused;
-    pauseBtn.textContent = paused ? 'Resume' : 'Pause';
+    if (state === STATES.RESULTS) return;
+    setGameState(state === STATES.PAUSED ? STATES.PLAYING : STATES.PAUSED);
   }
 
   canvas.addEventListener('pointermove', (e) => {
@@ -695,18 +703,16 @@
       bestStreakThisRun = Math.max(bestStreakThisRun, currentSafeStreak);
     }
 
-    if (dangerTimer >= DANGER_GRACE_SECONDS && !gameOver) triggerGameOver();
+    if (dangerTimer >= DANGER_GRACE_SECONDS && state === STATES.PLAYING) triggerGameOver();
 
-    if (!gameOver && Math.floor(score) > best) {
+    if (state !== STATES.RESULTS && Math.floor(score) > best) {
       best = Math.floor(score);
       safeSetBest(best);
     }
   }
 
   function triggerGameOver() {
-    gameOver = true;
-    gamePhase = 'results';
-    pressedKeys.clear();
+    if (state === STATES.RESULTS) return;
     best = Math.max(best, Math.floor(score));
     safeSetBest(best);
     const finalScore = Math.floor(score);
@@ -720,7 +726,7 @@
     playGameOverSound();
     updateHud();
     announceAssertive(`Run over, final score ${finalScore.toLocaleString()}.`);
-    showPlayAgainButton();
+    setGameState(STATES.RESULTS);
   }
 
   function regularPolygon(cx, cy, r, sides, rotation) {
@@ -877,7 +883,7 @@
 
   function drawDangerLine() {
     const warningPulse = 0.5 + 0.5 * Math.sin(performance.now() * (dangerTimer > 1 ? 0.024 : 0.012));
-    const isWarning = dangerActive && gamePhase === 'playing';
+    const isWarning = dangerActive && state === STATES.PLAYING;
     const alpha = isWarning ? 0.72 + warningPulse * 0.28 : 0.45;
     ctx.strokeStyle = isWarning ? `rgba(255,96,96,${alpha})` : 'rgba(255,171,90,0.5)';
     ctx.shadowColor = isWarning ? `rgba(255,96,96,${alpha})` : 'rgba(255,171,90,0.42)';
@@ -908,7 +914,7 @@
   }
 
   function drawDangerWarning() {
-    if (!dangerActive || gamePhase !== 'playing') return;
+    if (!dangerActive || state !== STATES.PLAYING) return;
     const remaining = Math.max(0, DANGER_GRACE_SECONDS - dangerTimer);
     ctx.save();
     ctx.globalAlpha = clamp(0.45 + (dangerTimer / DANGER_GRACE_SECONDS) * 0.55, 0.45, 1);
@@ -923,7 +929,7 @@
   }
 
   function drawBestTierBanner() {
-    if (!bestTierBanner || gamePhase !== 'playing') return;
+    if (!bestTierBanner || state !== STATES.PLAYING) return;
     const p = 1 - bestTierBanner.life / bestTierBanner.maxLife;
     const alpha = 1 - p;
     const w = WELL.right - WELL.left - 70;
@@ -1047,8 +1053,8 @@
     }
     ctx.globalAlpha = 1;
 
-    if (paused && gamePhase === 'playing') overlayMessage('PAUSED', 'Press Pause again to resume');
-    if (gamePhase === 'results') drawResultsOverlay();
+    if (state === STATES.PAUSED) overlayMessage('PAUSED', 'Press Pause again to resume');
+    if (state === STATES.RESULTS) drawResultsOverlay();
     drawDangerWarning();
     drawBestTierBanner();
 
@@ -1062,7 +1068,7 @@
     lastTime = ts;
     accumulator += dt;
 
-    if (!paused && gamePhase === 'playing') {
+    if (state === STATES.PLAYING) {
       applyKeyboardAim(dt);
       while (accumulator >= FIXED_STEP) {
         stepPhysics(FIXED_STEP);
