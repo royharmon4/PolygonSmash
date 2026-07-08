@@ -139,6 +139,11 @@ canvas {
   text-shadow: 0 1px 6px rgba(0,0,0,0.42);
 }
 
+.canvas-wrap {
+  position: relative;
+  display: block;
+}
+
 canvas {
   width: 100%;
   aspect-ratio: 480 / 760;
@@ -152,6 +157,12 @@ canvas {
   border: 1px solid rgba(255,255,255,0.08);
   touch-action: none;
   cursor: crosshair;
+  outline: none;
+}
+
+canvas:focus-visible {
+  border-color: rgba(127,255,212,0.95);
+  box-shadow: 0 0 0 4px rgba(127,255,212,0.18), 0 0 28px rgba(127,255,212,0.24);
 }
 
 .controls {
@@ -174,6 +185,11 @@ button {
   box-shadow: 0 10px 22px rgba(94,149,242,0.35);
 }
 
+button:focus-visible {
+  outline: 3px solid rgba(127,255,212,0.9);
+  outline-offset: 3px;
+}
+
 button:active {
   transform: translateY(1px);
 }
@@ -185,12 +201,45 @@ button.secondary {
   border: 1px solid rgba(255,255,255,0.1);
 }
 
+.play-again-overlay {
+  position: absolute;
+  left: 50%;
+  bottom: 72px;
+  width: min(76%, 330px);
+  min-height: 58px;
+  transform: translateX(-50%);
+  z-index: 4;
+  background: linear-gradient(180deg, #78e9ad, #55ce91);
+  color: #08291a;
+  border: 2px solid rgba(255,255,255,0.9);
+  border-radius: 16px;
+  font-size: 1.7rem;
+  letter-spacing: -0.03em;
+  text-transform: uppercase;
+}
+
+.play-again-overlay[hidden] {
+  display: none;
+}
+
 .quick-help {
   margin: 8px 4px 0;
   color: var(--muted);
   font-size: 0.8rem;
   line-height: 1.35;
   text-align: center;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .panel {
@@ -363,5 +412,11 @@ h2 {
     min-height: 42px;
     padding-inline: 8px;
     font-size: 0.88rem;
+  }
+
+  .play-again-overlay {
+    bottom: 58px;
+    min-height: 54px;
+    font-size: 1.45rem;
   }
 }
