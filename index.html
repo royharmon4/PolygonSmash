@@ -33,9 +33,8 @@
       <div class="controls" aria-label="Game controls">
         <button id="restartBtn" type="button">Restart</button>
         <button id="pauseBtn" class="secondary" type="button">Pause</button>
-        <button id="muteBtn" class="secondary" type="button">Sound On</button>
       </div>
-      <p class="quick-help">Drag/click to shoot · Space fires · R restarts · P pauses · M mutes</p>
+      <p class="quick-help">Drag/click to shoot · Space fires · R restarts · P pauses</p>
     </section>
 
     <aside class="card panel legend">
@@ -48,16 +47,27 @@
       <section class="rules-card">
         <h2>How to win longer runs</h2>
         <ul>
-          <li>Use the dotted path preview before every shot.</li>
+          <li>Use the dotted aim line before every shot.</li>
           <li>Merge identical tiers before the pile reaches the red line.</li>
-          <li>Chain merges multiply score and clear space faster.</li>
+          <li>Watch the Next 2 queue so you do not trap useful pieces.</li>
           <li>Dodecagons explode when merged, clearing nearby pieces.</li>
         </ul>
       </section>
 
       <section>
         <h2>Tier ladder</h2>
-        <div class="tier-list" id="tierList"></div>
+        <div class="tier-list">
+          <div class="tier-row"><span class="tier-icon triangle"></span><span>1. Triangle</span><span class="pill">+10</span></div>
+          <div class="tier-row"><span class="tier-icon square"></span><span>2. Square</span><span class="pill">+30</span></div>
+          <div class="tier-row"><span class="tier-icon pentagon"></span><span>3. Pentagon</span><span class="pill">+75</span></div>
+          <div class="tier-row"><span class="tier-icon hexagon"></span><span>4. Hexagon</span><span class="pill">+180</span></div>
+          <div class="tier-row"><span class="tier-icon heptagon"></span><span>5. Heptagon</span><span class="pill">+420</span></div>
+          <div class="tier-row"><span class="tier-icon octagon"></span><span>6. Octagon</span><span class="pill">+950</span></div>
+          <div class="tier-row"><span class="tier-icon nonagon"></span><span>7. Nonagon</span><span class="pill">+2.1k</span></div>
+          <div class="tier-row"><span class="tier-icon decagon"></span><span>8. Decagon</span><span class="pill">+4.8k</span></div>
+          <div class="tier-row"><span class="tier-icon hendecagon"></span><span>9. Hendecagon</span><span class="pill">+11k</span></div>
+          <div class="tier-row"><span class="tier-icon dodecagon"></span><span>10. Dodecagon</span><span class="pill">blast</span></div>
+        </div>
       </section>
     </aside>
   </main>
