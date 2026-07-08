@@ -755,21 +755,6 @@
     const barrelEndY = LAUNCHER_Y + dy * 76;
     const cooldownProgress = clamp(1 - launchCooldown / LAUNCH_COOLDOWN, 0, 1);
 
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.font = '900 12px Inter, sans-serif';
-    const labelText = 'CURRENT SHOT';
-    const labelW = 112;
-    const labelH = 24;
-    const labelX = LAUNCHER_X - labelW / 2;
-    const labelY = LAUNCHER_Y - pieceR - 34;
-    ctx.fillStyle = 'rgba(6,14,28,0.86)';
-    ctx.strokeStyle = 'rgba(180,220,255,0.58)';
-    ctx.lineWidth = 1.5;
-    roundRect(labelX, labelY, labelW, labelH, 12, true, true);
-    ctx.fillStyle = 'rgba(230,245,255,0.9)';
-    ctx.fillText(labelText, LAUNCHER_X, labelY + labelH / 2 + 1);
-
     ctx.lineCap = 'round';
     ctx.strokeStyle = 'rgba(141,192,255,0.88)';
     ctx.lineWidth = 15;
