@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
   <meta name="theme-color" content="#09111f" />
   <title>Polygon Smash Arcade</title>
-  <link rel="stylesheet" href="styles.css?v=20260708d" />
+  <link rel="stylesheet" href="styles.css?v=20260708e" />
 </head>
 <body>
   <main class="shell" aria-label="Polygon Smash Arcade">
@@ -29,15 +29,16 @@
       </div>
 
       <div class="canvas-wrap">
-        <canvas id="game" width="480" height="760" tabindex="0" role="application" aria-label="Polygon Smash game. Use Left and Right arrows or A and D to aim, Space to fire, R to restart, and P to pause."></canvas>
+        <canvas id="game" width="480" height="760" tabindex="0" role="application" aria-label="Polygon Smash game. Use Left and Right arrows or A and D to aim, Space to fire, R to restart, P to pause, and M to mute sound."></canvas>
         <button id="playAgainBtn" class="play-again-overlay" type="button" hidden>Play Again</button>
       </div>
 
       <div class="controls" aria-label="Game controls">
         <button id="restartBtn" type="button">Restart</button>
         <button id="pauseBtn" class="secondary" type="button">Pause</button>
+        <button id="muteBtn" class="secondary" type="button" aria-pressed="false">Sound On</button>
       </div>
-      <p class="quick-help">Drag/click to shoot · Arrows/A/D aim · Space fires · R restarts · P pauses</p>
+      <p class="quick-help">Drag/click to shoot · Arrows/A/D aim · Space fires · R restarts · P pauses · M mutes</p>
       <div id="assertiveLive" class="sr-only" aria-live="assertive" aria-atomic="true"></div>
       <div id="politeLive" class="sr-only" aria-live="polite" aria-atomic="true"></div>
     </section>
@@ -77,6 +78,6 @@
     </aside>
   </main>
 
-  <script src="game.js?v=20260708f"></script>
+  <script src="game.js?v=20260708g"></script>
 </body>
 </html>
