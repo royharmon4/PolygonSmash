@@ -13,7 +13,7 @@
   const MARGIN = 24;
   const WELL = { left: MARGIN, right: WIDTH - MARGIN, top: 10, bottom: HEIGHT - 34 };
   const LAUNCHER_X = WIDTH / 2;
-  const LAUNCHER_Y = WELL.bottom - 32;
+  const LAUNCHER_Y = WELL.bottom - 58;
   const FIXED_CEILING_Y = WELL.top;
   const DANGER_Y = HEIGHT - 180;
 
@@ -306,8 +306,8 @@
     const r = radiusForTier(tier);
     const dx = Math.cos(aimAngle);
     const dy = Math.sin(aimAngle);
-    const x = clamp(LAUNCHER_X + dx * 46, WELL.left + r, WELL.right - r);
-    const y = clamp(LAUNCHER_Y + dy * 46, FIXED_CEILING_Y + r, WELL.bottom - r);
+    const x = clamp(LAUNCHER_X + dx * 50, WELL.left + r, WELL.right - r);
+    const y = clamp(LAUNCHER_Y + dy * 50, FIXED_CEILING_Y + r, WELL.bottom - r);
     pieces.push(createPiece(x, y, tier, dx * LAUNCH_SPEED, dy * LAUNCH_SPEED));
     addDirectionalBurst(x, y, 8, tierData(tier).color, -dx, -dy, 0.5, 80, 170);
     launchCooldown = LAUNCH_COOLDOWN;
@@ -748,29 +748,57 @@
     const data = tierData(nextTier);
     const dx = Math.cos(aimAngle);
     const dy = Math.sin(aimAngle);
-    const barrelLen = 50;
-    const tipX = LAUNCHER_X + dx * barrelLen;
-    const tipY = LAUNCHER_Y + dy * barrelLen;
+    const pieceR = radiusForTier(nextTier) * 0.76;
+    const barrelStartX = LAUNCHER_X + dx * (pieceR + 9);
+    const barrelStartY = LAUNCHER_Y + dy * (pieceR + 9);
+    const barrelEndX = LAUNCHER_X + dx * 76;
+    const barrelEndY = LAUNCHER_Y + dy * 76;
     const cooldownProgress = clamp(1 - launchCooldown / LAUNCH_COOLDOWN, 0, 1);
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = '900 12px Inter, sans-serif';
+    const labelText = 'CURRENT SHOT';
+    const labelW = 112;
+    const labelH = 24;
+    const labelX = LAUNCHER_X - labelW / 2;
+    const labelY = LAUNCHER_Y - pieceR - 34;
+    ctx.fillStyle = 'rgba(6,14,28,0.86)';
+    ctx.strokeStyle = 'rgba(180,220,255,0.58)';
+    ctx.lineWidth = 1.5;
+    roundRect(labelX, labelY, labelW, labelH, 12, true, true);
+    ctx.fillStyle = 'rgba(230,245,255,0.9)';
+    ctx.fillText(labelText, LAUNCHER_X, labelY + labelH / 2 + 1);
 
     ctx.lineCap = 'round';
     ctx.strokeStyle = 'rgba(141,192,255,0.88)';
     ctx.lineWidth = 15;
     ctx.beginPath();
-    ctx.moveTo(LAUNCHER_X, LAUNCHER_Y);
-    ctx.lineTo(tipX, tipY);
+    ctx.moveTo(barrelStartX, barrelStartY);
+    ctx.lineTo(barrelEndX, barrelEndY);
     ctx.stroke();
     ctx.lineWidth = 5;
     ctx.strokeStyle = 'rgba(255,255,255,0.72)';
     ctx.beginPath();
-    ctx.moveTo(LAUNCHER_X, LAUNCHER_Y);
-    ctx.lineTo(tipX, tipY);
+    ctx.moveTo(barrelStartX, barrelStartY);
+    ctx.lineTo(barrelEndX, barrelEndY);
     ctx.stroke();
     ctx.lineCap = 'butt';
 
-    const pieceR = radiusForTier(nextTier) * 0.76;
     ctx.save();
     ctx.translate(LAUNCHER_X, LAUNCHER_Y);
+    ctx.beginPath();
+    ctx.arc(0, 0, pieceR + 11, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(5,12,24,0.74)';
+    ctx.fill();
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+    ctx.stroke();
+    ctx.strokeStyle = cooldownProgress >= 1 ? '#7fffd4' : '#8dc0ff';
+    ctx.beginPath();
+    ctx.arc(0, 0, pieceR + 11, -Math.PI / 2, -Math.PI / 2 + cooldownProgress * Math.PI * 2);
+    ctx.stroke();
+
     regularPolygon(0, 0, pieceR, data.sides, -Math.PI / 2);
     ctx.fillStyle = data.color;
     ctx.shadowColor = data.color;
@@ -778,7 +806,7 @@
     ctx.fill();
     ctx.shadowBlur = 0;
     ctx.lineWidth = 3;
-    ctx.strokeStyle = 'rgba(255,255,255,0.94)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.96)';
     ctx.stroke();
     regularPolygon(0, 0, pieceR * 0.52, data.sides, Math.PI / data.sides);
     ctx.fillStyle = 'rgba(255,255,255,0.18)';
@@ -789,22 +817,6 @@
     ctx.textBaseline = 'middle';
     ctx.fillText(String(nextTier), 0, 1);
     ctx.restore();
-
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
-    ctx.fillStyle = 'rgba(230,245,255,0.72)';
-    ctx.font = '900 11px Inter, sans-serif';
-    ctx.fillText('NOW', LAUNCHER_X, LAUNCHER_Y + pieceR + 8);
-
-    ctx.lineWidth = 4;
-    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
-    ctx.beginPath();
-    ctx.arc(LAUNCHER_X, LAUNCHER_Y, pieceR + 9, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.strokeStyle = cooldownProgress >= 1 ? '#7fffd4' : '#8dc0ff';
-    ctx.beginPath();
-    ctx.arc(LAUNCHER_X, LAUNCHER_Y, pieceR + 9, -Math.PI / 2, -Math.PI / 2 + cooldownProgress * Math.PI * 2);
-    ctx.stroke();
   }
 
   function drawCeiling() {
