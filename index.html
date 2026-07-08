@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
   <meta name="theme-color" content="#09111f" />
   <title>Polygon Smash Arcade</title>
-  <link rel="stylesheet" href="styles.css?v=20260708b" />
+  <link rel="stylesheet" href="styles.css?v=20260708c" />
 </head>
 <body>
   <main class="shell" aria-label="Polygon Smash Arcade">
@@ -28,13 +28,18 @@
         </div>
       </div>
 
-      <canvas id="game" width="480" height="760" aria-label="Polygon Smash game canvas"></canvas>
+      <div class="canvas-wrap">
+        <canvas id="game" width="480" height="760" tabindex="0" role="application" aria-label="Polygon Smash game. Use Left and Right arrows or A and D to aim, Space to fire, R to restart, and P to pause."></canvas>
+        <button id="playAgainBtn" class="play-again-overlay" type="button" hidden>Play Again</button>
+      </div>
 
       <div class="controls" aria-label="Game controls">
         <button id="restartBtn" type="button">Restart</button>
         <button id="pauseBtn" class="secondary" type="button">Pause</button>
       </div>
-      <p class="quick-help">Drag/click to shoot · Space fires · R restarts · P pauses</p>
+      <p class="quick-help">Drag/click to shoot · Arrows/A/D aim · Space fires · R restarts · P pauses</p>
+      <div id="assertiveLive" class="sr-only" aria-live="assertive" aria-atomic="true"></div>
+      <div id="politeLive" class="sr-only" aria-live="polite" aria-atomic="true"></div>
     </section>
 
     <aside class="card panel legend">
@@ -72,6 +77,6 @@
     </aside>
   </main>
 
-  <script src="game.js?v=20260708c"></script>
+  <script src="game.js?v=20260708d"></script>
 </body>
 </html>
