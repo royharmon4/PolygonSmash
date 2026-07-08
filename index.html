@@ -2,57 +2,65 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+  <meta name="theme-color" content="#09111f" />
   <title>Polygon Smash Arcade</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div class="shell">
+  <main class="shell" aria-label="Polygon Smash Arcade">
     <section class="card game-card">
-      <div class="hud">
+      <div class="hud" aria-live="polite">
         <div class="hud-group">
           <div class="hud-label">Score</div>
           <div class="hud-value" id="score">0</div>
         </div>
-        <div class="hud-group queue-group" aria-live="polite">
+        <div class="hud-group queue-group">
           <div class="hud-label">Next 2</div>
           <div class="queue" id="queuePreview">
             <div class="queue-slot" id="queueSlot1"></div>
             <div class="queue-slot" id="queueSlot2"></div>
           </div>
         </div>
-        <div class="hud-group center">
+        <div class="hud-group right">
           <div class="hud-label">Best</div>
           <div class="hud-value gold" id="best">0</div>
         </div>
       </div>
-      <canvas id="game" width="480" height="760" aria-label="Polygon Smash Arcade game canvas"></canvas>
 
-      <div class="controls">
-        <button id="restartBtn">Restart</button>
-        <button id="pauseBtn" class="secondary">Pause</button>
+      <canvas id="game" width="480" height="760" aria-label="Polygon Smash game canvas"></canvas>
+
+      <div class="controls" aria-label="Game controls">
+        <button id="restartBtn" type="button">Restart</button>
+        <button id="pauseBtn" class="secondary" type="button">Pause</button>
+        <button id="muteBtn" class="secondary" type="button">Sound On</button>
       </div>
+      <p class="quick-help">Drag/click to shoot · Space fires · R restarts · P pauses · M mutes</p>
     </section>
 
     <aside class="card panel legend">
-      <div>
-        <h2>How to play</h2>
-        <p>Aim, then <strong>click/tap to fire</strong>. On mobile, drag to aim and <strong>lift</strong> to shoot.</p>
-        <ul>
-          <li>Gravity is inverted: pieces pull <strong>upward</strong> and settle against the fixed ceiling.</li>
-          <li>The ladder is fixed: match two equal tiers to create the next tier.</li>
-          <li>The danger line is fixed near the bottom. If a settled piece stays below it for about 2 seconds, you lose.</li>
-          <li>Dodecagon capstones explode on merge and clear nearby pieces.</li>
-        </ul>
-      </div>
+      <header>
+        <p class="eyebrow">Inverted-gravity merge shooter</p>
+        <h1>Polygon Smash</h1>
+        <p class="lede">Fire polygons upward. Match equal tiers. Keep the pile above the danger line.</p>
+      </header>
 
-      <div>
-        <h2>Arcade notes</h2>
-        <p>Plan with the Next 2 queue to keep a clean merge path before the danger timer starts.</p>
-        <p class="hint">Fast planning beats panic shots.</p>
-      </div>
+      <section class="rules-card">
+        <h2>How to win longer runs</h2>
+        <ul>
+          <li>Use the dotted path preview before every shot.</li>
+          <li>Merge identical tiers before the pile reaches the red line.</li>
+          <li>Chain merges multiply score and clear space faster.</li>
+          <li>Dodecagons explode when merged, clearing nearby pieces.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Tier ladder</h2>
+        <div class="tier-list" id="tierList"></div>
+      </section>
     </aside>
-  </div>
+  </main>
 
   <script src="game.js"></script>
 </body>
