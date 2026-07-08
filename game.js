@@ -7,6 +7,9 @@
   const queueSlot2El = document.getElementById('queueSlot2');
   const restartBtn = document.getElementById('restartBtn');
   const pauseBtn = document.getElementById('pauseBtn');
+  const playAgainBtn = document.getElementById('playAgainBtn');
+  const assertiveLiveEl = document.getElementById('assertiveLive');
+  const politeLiveEl = document.getElementById('politeLive');
 
   const WIDTH = canvas.width;
   const HEIGHT = canvas.height;
@@ -25,6 +28,9 @@
   const MATCH_BOUNCE = 0.01;
   const LAUNCH_SPEED = 700;
   const LAUNCH_COOLDOWN = 0.42;
+  const KEYBOARD_AIM_SPEED = 2.35;
+  const AIM_MIN_ANGLE = -Math.PI + 0.18;
+  const AIM_MAX_ANGLE = -0.18;
   const BASE_RADIUS = 24;
   const EXPLOSION_RADIUS = BASE_RADIUS * 3.8;
   const DANGER_GRACE_SECONDS = 2;
@@ -90,12 +96,12 @@
   let earnedBestTierThisRun = 0;
   let bestStreakThisRun = 0;
   let currentSafeStreak = 0;
-  let resultsButtonRect = null;
   let finalRunStats = null;
   let bestTierBanner = null;
   let audioCtx = null;
   let audioMaster = null;
   let noiseBuffer = null;
+  const pressedKeys = new Set();
 
   function safeGetBest() {
     try {
@@ -159,6 +165,33 @@
     bestEl.textContent = Math.floor(best).toLocaleString();
     renderQueueSlot(queueSlot1El, queueTiers[0]);
     renderQueueSlot(queueSlot2El, queueTiers[1]);
+  }
+
+  function announceAssertive(message) {
+    if (!assertiveLiveEl) return;
+    assertiveLiveEl.textContent = '';
+    window.setTimeout(() => {
+      assertiveLiveEl.textContent = message;
+    }, 0);
+  }
+
+  function announcePolite(message) {
+    if (!politeLiveEl) return;
+    politeLiveEl.textContent = '';
+    window.setTimeout(() => {
+      politeLiveEl.textContent = message;
+    }, 0);
+  }
+
+  function showPlayAgainButton() {
+    if (!playAgainBtn) return;
+    playAgainBtn.hidden = false;
+    window.requestAnimationFrame(() => playAgainBtn.focus());
+  }
+
+  function hidePlayAgainButton() {
+    if (!playAgainBtn) return;
+    playAgainBtn.hidden = true;
   }
 
   function ensureAudioContext() {
@@ -263,6 +296,7 @@
     effects = [];
     queuedMerges = [];
     mergeContactTimes = new Map();
+    pressedKeys.clear();
     nextId = 1;
     score = 0;
     launchCooldown = 0;
@@ -276,13 +310,14 @@
     bestStreakThisRun = 0;
     currentSafeStreak = 0;
     finalRunStats = null;
-    resultsButtonRect = null;
     bestTierBanner = null;
     aimAngle = -Math.PI / 2;
     nextTier = randomSpawnTier();
     queueTiers = [randomSpawnTier(), randomSpawnTier()];
     pauseBtn.textContent = 'Pause';
+    hidePlayAgainButton();
     updateHud();
+    window.requestAnimationFrame(() => canvas.focus());
   }
 
   function clientToCanvas(clientX, clientY) {
@@ -294,9 +329,16 @@
   }
 
   function aimAtCanvasPoint(cx, cy) {
-    let angle = Math.atan2(cy - LAUNCHER_Y, cx - LAUNCHER_X);
-    angle = clamp(angle, -Math.PI + 0.18, -0.18);
-    aimAngle = angle;
+    aimAngle = clamp(Math.atan2(cy - LAUNCHER_Y, cx - LAUNCHER_X), AIM_MIN_ANGLE, AIM_MAX_ANGLE);
+  }
+
+  function applyKeyboardAim(dt) {
+    if (gamePhase !== 'playing' || paused) return;
+    const leftPressed = pressedKeys.has('ArrowLeft') || pressedKeys.has('KeyA');
+    const rightPressed = pressedKeys.has('ArrowRight') || pressedKeys.has('KeyD');
+    if (leftPressed === rightPressed) return;
+    const direction = leftPressed ? -1 : 1;
+    aimAngle = clamp(aimAngle + direction * KEYBOARD_AIM_SPEED * dt, AIM_MIN_ANGLE, AIM_MAX_ANGLE);
   }
 
   function launch() {
@@ -330,11 +372,8 @@
 
   canvas.addEventListener('pointerdown', (e) => {
     ensureAudioContext();
+    canvas.focus();
     const p = clientToCanvas(e.clientX, e.clientY);
-    if (gamePhase === 'results' && isInResultsButton(p.x, p.y)) {
-      resetGame();
-      return;
-    }
     aimAtCanvasPoint(p.x, p.y);
     if (e.pointerType === 'mouse') launch();
   });
@@ -342,10 +381,6 @@
   canvas.addEventListener('pointerup', (e) => {
     ensureAudioContext();
     const p = clientToCanvas(e.clientX, e.clientY);
-    if (gamePhase === 'results' && isInResultsButton(p.x, p.y)) {
-      resetGame();
-      return;
-    }
     aimAtCanvasPoint(p.x, p.y);
     if (e.pointerType !== 'mouse') launch();
   });
@@ -354,9 +389,13 @@
   canvas.addEventListener('touchend', (e) => e.preventDefault(), { passive: false });
 
   window.addEventListener('keydown', (e) => {
+    if (['ArrowLeft', 'ArrowRight', 'KeyA', 'KeyD', 'Space'].includes(e.code)) e.preventDefault();
+    if (e.code === 'ArrowLeft' || e.code === 'ArrowRight' || e.code === 'KeyA' || e.code === 'KeyD') {
+      pressedKeys.add(e.code);
+      return;
+    }
     ensureAudioContext();
     if (e.code === 'Space') {
-      e.preventDefault();
       launch();
     } else if (e.code === 'KeyR') {
       resetGame();
@@ -365,8 +404,17 @@
     }
   });
 
+  window.addEventListener('keyup', (e) => {
+    pressedKeys.delete(e.code);
+  });
+
+  window.addEventListener('blur', () => {
+    pressedKeys.clear();
+  });
+
   restartBtn.addEventListener('click', resetGame);
   pauseBtn.addEventListener('click', togglePause);
+  playAgainBtn?.addEventListener('click', resetGame);
 
   function queueMerge(a, b) {
     if (!a || !b || a.merged || b.merged) return;
@@ -389,6 +437,7 @@
       life: 1.1,
       maxLife: 1.1,
     };
+    announcePolite(`New highest tier earned: tier ${tier}, ${info.name}.`);
   }
 
   function processMerges() {
@@ -657,10 +706,12 @@
   function triggerGameOver() {
     gameOver = true;
     gamePhase = 'results';
+    pressedKeys.clear();
     best = Math.max(best, Math.floor(score));
     safeSetBest(best);
+    const finalScore = Math.floor(score);
     finalRunStats = {
-      score: Math.floor(score),
+      score: finalScore,
       best,
       earnedTier: earnedBestTierThisRun,
       bestStreak: bestStreakThisRun,
@@ -668,6 +719,8 @@
     addBurst(WIDTH / 2, DANGER_Y, 28, '#ff7777');
     playGameOverSound();
     updateHud();
+    announceAssertive(`Run over, final score ${finalScore.toLocaleString()}.`);
+    showPlayAgainButton();
   }
 
   function regularPolygon(cx, cy, r, sides, rotation) {
@@ -891,17 +944,12 @@
     ctx.restore();
   }
 
-  function isInResultsButton(x, y) {
-    if (!resultsButtonRect) return false;
-    return x >= resultsButtonRect.x && x <= resultsButtonRect.x + resultsButtonRect.w && y >= resultsButtonRect.y && y <= resultsButtonRect.y + resultsButtonRect.h;
-  }
-
   function drawResultsOverlay() {
     const stats = finalRunStats || { score: Math.floor(score), best, earnedTier: earnedBestTierThisRun, bestStreak: bestStreakThisRun };
     const panelW = WELL.right - WELL.left - 36;
-    const panelH = 384;
+    const panelH = 310;
     const panelX = WELL.left + (WELL.right - WELL.left - panelW) / 2;
-    const panelY = WELL.top + 70;
+    const panelY = WELL.top + 86;
     ctx.fillStyle = 'rgba(3,7,16,0.8)';
     ctx.fillRect(WELL.left, WELL.top, WELL.right - WELL.left, WELL.bottom - WELL.top);
     ctx.fillStyle = 'rgba(15,25,46,0.96)';
@@ -919,25 +967,11 @@
       `Final Score: ${stats.score.toLocaleString()}`,
       `Best Score: ${stats.best.toLocaleString()}`,
       `Highest Earned: ${earnedText}`,
-      `Tier Ladder: ${MAX_TIER} fixed tiers`,
       `Best Streak: ${stats.bestStreak.toFixed(1)}s`,
     ];
     ctx.font = '600 20px Inter, sans-serif';
     ctx.fillStyle = '#bed6ff';
-    rows.forEach((line, idx) => ctx.fillText(line, WIDTH / 2, panelY + 94 + idx * 36));
-
-    const btnW = panelW - 80;
-    const btnH = 58;
-    const btnX = panelX + (panelW - btnW) / 2;
-    const btnY = panelY + panelH - btnH - 20;
-    resultsButtonRect = { x: btnX, y: btnY, w: btnW, h: btnH };
-    ctx.fillStyle = '#65d89e';
-    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
-    ctx.lineWidth = 2.5;
-    roundRect(btnX, btnY, btnW, btnH, 14, true, true);
-    ctx.fillStyle = '#08291a';
-    ctx.font = '900 30px Inter, sans-serif';
-    ctx.fillText('PLAY AGAIN', WIDTH / 2, btnY + btnH / 2 + 1);
+    rows.forEach((line, idx) => ctx.fillText(line, WIDTH / 2, panelY + 94 + idx * 38));
   }
 
   function draw() {
@@ -1029,6 +1063,7 @@
     accumulator += dt;
 
     if (!paused && gamePhase === 'playing') {
+      applyKeyboardAim(dt);
       while (accumulator >= FIXED_STEP) {
         stepPhysics(FIXED_STEP);
         stepEffects(FIXED_STEP);
@@ -1045,6 +1080,7 @@
     requestAnimationFrame(frame);
   }
 
+  hidePlayAgainButton();
   resetGame();
   requestAnimationFrame(frame);
 })();
